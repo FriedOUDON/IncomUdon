@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">IncomUdon</string>
+    <string name="bg_service_channel_name">Background Receive</string>
+    <string name="bg_service_channel_desc">Keeps UDP receive active while app is in background.</string>
+    <string name="bg_service_title">IncomUdon is running</string>
+    <string name="bg_service_text">Receiving audio in background</string>
+</resources>

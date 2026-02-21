@@ -1,0 +1,5 @@
+# Separated repositories / non-upstream-managed directories
+/build/
+/third_party/libcodec2/
+/server/
+/pwa_client/
