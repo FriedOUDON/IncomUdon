@@ -20,7 +20,8 @@ Window {
         property string serverPort: "50000"
         property string channelId: "100"
         property string password: ""
-        property var bitrateOptions: [450, 700, 1600, 2400, 3200]
+        property var codec2ModeOptions: [450, 700, 1600, 2400, 3200]
+        property var opusBpsOptions: [6000, 8000, 12000, 16000, 20000, 64000, 96000, 128000]
         property url defaultPttOnSoundUrl: "qrc:/qt/qml/IncomUdon/assets/sfx/ptt_on.wav"
         property url defaultPttOffSoundUrl: "qrc:/qt/qml/IncomUdon/assets/sfx/ptt_off.wav"
         property url defaultCarrierSenseSoundUrl: "qrc:/qt/qml/IncomUdon/assets/sfx/carrier_sense.wav"
@@ -39,6 +40,7 @@ Window {
         property bool carrierCuePending: false
         property bool codec2Selectable: appState.codec2LibraryPath.length > 0 &&
                                         appState.codec2LibraryLoaded
+        property bool opusSelectable: appState.opusAvailable
         property bool pttOnVoiceFlip: false
         property bool pttOffVoiceFlip: false
         property double lastCarrierCueMs: 0
@@ -69,6 +71,20 @@ Window {
             return n
         }
 
+        function parseSenderIdInput(v) {
+            var textValue = (v === undefined || v === null) ? "" : v.toString().trim()
+            if (textValue.length === 0)
+                return 0
+            var n = Number(textValue)
+            if (!isFinite(n))
+                return 0
+            if (Math.floor(n) !== n)
+                return 0
+            if (n < 1 || n > 2147483647)
+                return 0
+            return n
+        }
+
         function fileNameFromUrl(urlValue) {
             if (!urlValue || urlValue.toString().length === 0)
                 return "(none)"
@@ -83,33 +99,84 @@ Window {
             return s
         }
 
-        function normalizeBitrate(value) {
-            var best = bitrateOptions[0]
+        function nearestValue(model, value) {
+            var best = model[0]
             var bestDiff = Math.abs(value - best)
-            for (var i = 1; i < bitrateOptions.length; ++i) {
-                var diff = Math.abs(value - bitrateOptions[i])
+            for (var i = 1; i < model.length; ++i) {
+                var diff = Math.abs(value - model[i])
                 if (diff < bestDiff) {
                     bestDiff = diff
-                    best = bitrateOptions[i]
+                    best = model[i]
                 }
             }
             return best
         }
 
-        function bitrateToIndex(bps) {
-            for (var i = 0; i < bitrateOptions.length; ++i) {
-                if (bitrateOptions[i] === bps)
+        function normalizeBitrate(value) {
+            var best = codec2ModeOptions[0]
+            var bestDiff = Math.abs(value - best)
+            for (var i = 1; i < codec2ModeOptions.length; ++i) {
+                var diff = Math.abs(value - codec2ModeOptions[i])
+                if (diff < bestDiff) {
+                    bestDiff = diff
+                    best = codec2ModeOptions[i]
+                }
+            }
+            return best
+        }
+
+        function bitrateLabel(value, selection) {
+            var n = parseInt(value)
+            if (isNaN(n))
+                n = 0
+            if (selection === 2)
+                return Math.round(n / 1000) + " kbps"
+            return n + " bps"
+        }
+
+        function legacyModeToOpusBps(mode) {
+            if (mode <= 450)
+                return 6000
+            if (mode <= 700)
+                return 8000
+            if (mode <= 1600)
+                return 12000
+            if (mode <= 2400)
+                return 16000
+            return 20000
+        }
+
+        function normalizeBitrateForSelection(value, selection) {
+            if (selection === 2) {
+                var target = value
+                if (target < 6000)
+                    target = legacyModeToOpusBps(target)
+                return nearestValue(opusBpsOptions, target)
+            }
+            return nearestValue(codec2ModeOptions, value)
+        }
+
+        function bitrateModelForSelection(selection) {
+            return selection === 2 ? opusBpsOptions : codec2ModeOptions
+        }
+
+        function bitrateToIndex(storedMode, selection) {
+            var model = bitrateModelForSelection(selection)
+            var targetValue = normalizeBitrateForSelection(storedMode, selection)
+            for (var i = 0; i < model.length; ++i) {
+                if (model[i] === targetValue)
                     return i
             }
             return 0
         }
 
-        function indexToBitrate(idx) {
+        function indexToBitrate(idx, selection) {
+            var model = bitrateModelForSelection(selection)
             if (idx < 0)
-                return bitrateOptions[0]
-            if (idx >= bitrateOptions.length)
-                return bitrateOptions[bitrateOptions.length - 1]
-            return bitrateOptions[idx]
+                idx = 0
+            if (idx >= model.length)
+                idx = model.length - 1
+            return model[idx]
         }
 
         function isLikelyBluetoothName(name) {
@@ -174,15 +241,15 @@ Window {
         }
 
         function syncCodec2Availability() {
-            if (!codec2Selectable && !appState.forcePcm) {
+            if (appState.codecSelection === 1 && !root.codec2Selectable) {
                 root.suppressForcePcmPersistence = true
-                appState.forcePcm = true
+                appState.codecSelection = root.opusSelectable ? 2 : 0
                 root.suppressForcePcmPersistence = false
                 return
             }
-            if (codec2Selectable && appState.forcePcm && !persisted.forcePcm) {
+            if (appState.codecSelection === 2 && !root.opusSelectable) {
                 root.suppressForcePcmPersistence = true
-                appState.forcePcm = false
+                appState.codecSelection = root.codec2Selectable ? 1 : 0
                 root.suppressForcePcmPersistence = false
             }
         }
@@ -203,8 +270,10 @@ Window {
             category: "ui"
             property string serverAddress: ""
             property string serverPort: "50000"
+            property int senderId: 0
             property string channelId: "100"
             property string password: ""
+            property int codecSelection: 0
             property int codecBitrate: 1600
             property bool forcePcm: true
             property bool txFecEnabled: true
@@ -223,17 +292,31 @@ Window {
             property string pttOffSoundUrl: ""
             property string carrierSenseSoundUrl: ""
             property string codec2LibraryPath: ""
+            property string opusLibraryPath: ""
             property string micInputDeviceId: ""
         }
 
         Component.onCompleted: {
             root.serverAddress = persisted.serverAddress
             root.serverPort = persisted.serverPort
+            var storedSenderId = root.clampInt(persisted.senderId, 0, 2147483647, 0)
+            if (storedSenderId > 0) {
+                appState.senderId = storedSenderId
+            } else if (appState.senderId > 0) {
+                persisted.senderId = appState.senderId
+            }
             root.channelId = persisted.channelId
             root.password = persisted.password
 
-            appState.codecBitrate = root.normalizeBitrate(persisted.codecBitrate)
-            appState.forcePcm = persisted.forcePcm
+            var initialCodecSelection = root.clampInt(
+                        persisted.codecSelection,
+                        0,
+                        2,
+                        persisted.forcePcm ? 0 : 1)
+            appState.codecSelection = initialCodecSelection
+            appState.codecBitrate = root.normalizeBitrateForSelection(
+                        persisted.codecBitrate,
+                        initialCodecSelection)
             appState.fecEnabled = persisted.txFecEnabled
             appState.cryptoMode = appState.opensslAvailable ? persisted.cryptoMode : 1
             appState.micVolumePercent = root.clampInt(persisted.micVolumePercent, 0, 200, 100)
@@ -252,6 +335,7 @@ Window {
             root.carrierSenseSoundUrl = persisted.carrierSenseSoundUrl.length > 0 ?
                                             persisted.carrierSenseSoundUrl : root.defaultCarrierSenseSoundUrl
             appState.codec2LibraryPath = persisted.codec2LibraryPath
+            appState.opusLibraryPath = persisted.opusLibraryPath
             audioInput.selectedInputDeviceId = persisted.micInputDeviceId
 
             root.syncCodec2Availability()
@@ -275,6 +359,8 @@ Window {
 
         Connections {
             target: appState
+            function onSenderIdChanged() { persisted.senderId = appState.senderId }
+            function onCodecSelectionChanged() { persisted.codecSelection = appState.codecSelection }
             function onCodecBitrateChanged() {
                 persisted.codecBitrate = appState.codecBitrate
             }
@@ -294,6 +380,7 @@ Window {
                 root.syncCodec2Availability()
             }
             function onCodec2LibraryLoadedChanged() { root.syncCodec2Availability() }
+            function onOpusLibraryPathChanged() { persisted.opusLibraryPath = appState.opusLibraryPath }
         }
 
         Connections {
@@ -636,6 +723,19 @@ Window {
             }
         }
 
+        FileDialog {
+            id: opusLibFileDialog
+            title: "Select opus dynamic library"
+            fileMode: FileDialog.OpenFile
+            nameFilters: ["Dynamic libraries (*.dll *.so *.dylib)", "All files (*)"]
+            onAccepted: {
+                var selected = selectedFile
+                if (!selected || selected.toString().length === 0)
+                    return
+                appState.opusLibraryPath = selected.toString()
+            }
+        }
+
         Column {
             anchors.fill: parent
             anchors.leftMargin: 12 + root.safeInsetLeft
@@ -757,10 +857,10 @@ Window {
                                 spacing: 8
 
                                 Rectangle {
-                                    width: 100
+                                    width: 88
                                     height: 28
                                     radius: 6
-                                    color: (!appState.forcePcm && root.codec2Selectable) ? "#4db6ac" : "#1a222b"
+                                    color: appState.codecSelection === 1 ? "#4db6ac" : "#1a222b"
                                     opacity: root.codec2Selectable ? 1.0 : 0.45
                                     border.color: "#263238"
                                     border.width: 1
@@ -769,48 +869,74 @@ Window {
                                         anchors.centerIn: parent
                                         text: "Codec2"
                                         color: root.codec2Selectable ?
-                                                   (!appState.forcePcm ? "#0b0f13" : "#cfd8dc") :
+                                                   (appState.codecSelection === 1 ? "#0b0f13" : "#cfd8dc") :
                                                    "#607d8b"
                                         font.pixelSize: 14
                                     }
 
                                     TapHandler {
                                         enabled: root.codec2Selectable
-                                        onTapped: appState.forcePcm = false
+                                        onTapped: appState.codecSelection = 1
                                     }
                                 }
 
                                 Rectangle {
-                                    width: 100
+                                    width: 88
                                     height: 28
                                     radius: 6
-                                    color: appState.forcePcm ? "#4db6ac" : "#1a222b"
+                                    color: appState.codecSelection === 2 ? "#4db6ac" : "#1a222b"
+                                    opacity: root.opusSelectable ? 1.0 : 0.45
+                                    border.color: "#263238"
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "Opus"
+                                        color: root.opusSelectable ?
+                                                   (appState.codecSelection === 2 ? "#0b0f13" : "#cfd8dc") :
+                                                   "#607d8b"
+                                        font.pixelSize: 14
+                                    }
+
+                                    TapHandler {
+                                        enabled: root.opusSelectable
+                                        onTapped: appState.codecSelection = 2
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: 88
+                                    height: 28
+                                    radius: 6
+                                    color: appState.codecSelection === 0 ? "#4db6ac" : "#1a222b"
                                     border.color: "#263238"
                                     border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: "PCM"
-                                        color: appState.forcePcm ? "#0b0f13" : "#cfd8dc"
+                                        color: appState.codecSelection === 0 ? "#0b0f13" : "#cfd8dc"
                                         font.pixelSize: 14
                                     }
 
-                                    TapHandler { onTapped: appState.forcePcm = true }
+                                    TapHandler { onTapped: appState.codecSelection = 0 }
                                 }
                             }
 
                             ComboBox {
                                 id: bitrateCombo
                                 width: parent.width
-                                model: root.bitrateOptions
-                                enabled: !appState.forcePcm && root.codec2Selectable
-                                currentIndex: root.bitrateToIndex(appState.codecBitrate)
-                                onActivated: appState.codecBitrate = root.indexToBitrate(currentIndex)
+                                model: root.bitrateModelForSelection(appState.codecSelection)
+                                enabled: appState.codecSelection !== 0 &&
+                                         ((appState.codecSelection === 1 && root.codec2Selectable) ||
+                                          (appState.codecSelection === 2 && root.opusSelectable))
+                                currentIndex: root.bitrateToIndex(appState.codecBitrate, appState.codecSelection)
+                                onActivated: appState.codecBitrate = root.indexToBitrate(currentIndex, appState.codecSelection)
 
                                 contentItem: Text {
                                     leftPadding: 10
                                     rightPadding: 10
-                                    text: bitrateCombo.currentText + " bps"
+                                    text: root.bitrateLabel(parseInt(bitrateCombo.currentText), appState.codecSelection)
                                     color: bitrateCombo.enabled ? "#cfd8dc" : "#607d8b"
                                     font.pixelSize: 15
                                     verticalAlignment: Text.AlignVCenter
@@ -826,14 +952,21 @@ Window {
 
                                 delegate: ItemDelegate {
                                     width: bitrateCombo.width
-                                    text: modelData + " bps"
+                                    text: root.bitrateLabel(modelData, appState.codecSelection)
                                     font.pixelSize: 15
                                 }
                             }
 
                             Text {
-                                visible: !root.codec2Selectable
+                                visible: appState.codecSelection === 1 && !root.codec2Selectable
                                 text: "Codec2 unavailable: select and load a dynamic library."
+                                color: "#78909c"
+                                font.pixelSize: 12
+                            }
+
+                            Text {
+                                visible: appState.codecSelection === 2 && !root.opusSelectable
+                                text: "Opus unavailable: place and link libopus prebuilt library."
                                 color: "#78909c"
                                 font.pixelSize: 12
                             }
@@ -1087,6 +1220,36 @@ Window {
                                 verticalAlignment: TextInput.AlignVCenter
                                 inputMethodHints: Qt.ImhDigitsOnly
                                 onTextChanged: root.serverPort = text
+                            }
+                        }
+
+                        Text {
+                            text: "Sender ID"
+                            color: "#90a4ae"
+                            font.pixelSize: 13
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 36
+                            radius: 6
+                            color: "#1a222b"
+                            border.color: "#263238"
+                            border.width: 1
+
+                            TextInput {
+                                id: senderIdInput
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                color: "#cfd8dc"
+                                text: appState.senderId > 0 ? appState.senderId.toString() : ""
+                                font.pixelSize: 15
+                                verticalAlignment: TextInput.AlignVCenter
+                                inputMethodHints: Qt.ImhDigitsOnly
+                                onEditingFinished: {
+                                    appState.senderId = root.parseSenderIdInput(text)
+                                    text = appState.senderId > 0 ? appState.senderId.toString() : ""
+                                }
                             }
                         }
 
@@ -1420,6 +1583,71 @@ Window {
                                            appState.codec2LibraryError :
                                            "Codec2 library not loaded (PCM fallback)")
                             color: appState.codec2LibraryLoaded ? "#4db6ac" : "#78909c"
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            text: "Opus Dynamic Library (Optional)"
+                            color: "#90a4ae"
+                            font.pixelSize: 13
+                        }
+
+                        Row {
+                            spacing: 8
+
+                            Rectangle {
+                                width: 56
+                                height: 28
+                                radius: 6
+                                color: "#1a222b"
+                                border.color: "#263238"
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Pick"
+                                    color: "#cfd8dc"
+                                    font.pixelSize: 13
+                                }
+                                TapHandler { onTapped: opusLibFileDialog.open() }
+                            }
+
+                            Rectangle {
+                                width: 56
+                                height: 28
+                                radius: 6
+                                color: "#1a222b"
+                                border.color: "#263238"
+                                border.width: 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Clear"
+                                    color: "#cfd8dc"
+                                    font.pixelSize: 13
+                                }
+                                TapHandler { onTapped: appState.opusLibraryPath = "" }
+                            }
+                        }
+
+                        Text {
+                            text: appState.opusLibraryPath.length > 0 ?
+                                      root.fileNameFromUrl(appState.opusLibraryPath) :
+                                      "(using linked opus)"
+                            color: "#607d8b"
+                            font.pixelSize: 12
+                        }
+
+                        Text {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            text: appState.opusLibraryPath.length === 0 ?
+                                      "Using linked Opus library." :
+                                      (appState.opusLibraryLoaded ?
+                                           "Loaded user-specified Opus library." :
+                                           (appState.opusLibraryError.length > 0 ?
+                                                appState.opusLibraryError :
+                                                "Opus library not loaded (linked fallback)."))
+                            color: (appState.opusLibraryPath.length === 0 || appState.opusLibraryLoaded) ?
+                                       "#4db6ac" : "#78909c"
                             font.pixelSize: 12
                         }
 

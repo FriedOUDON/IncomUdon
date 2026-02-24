@@ -63,6 +63,10 @@ option(USE_OPENSSL_WINDOWS_PREBUILT "Use prebuilt OpenSSL for Windows" ON)
 option(USE_CODEC2_WINDOWS_PREBUILT "Use prebuilt libcodec2 for Windows" ON)
 option(USE_CODEC2_SHARED_PREBUILT "Prefer prebuilt shared libcodec2 over static" ON)
 option(USE_CODEC2_STATIC_PREBUILT_FALLBACK "Allow static libcodec2 fallback when shared is unavailable" ON)
+option(USE_OPUS_ANDROID_PREBUILT "Use prebuilt libopus for Android" ON)
+option(USE_OPUS_WINDOWS_PREBUILT "Use prebuilt libopus for Windows" ON)
+option(USE_OPUS_SHARED_PREBUILT "Prefer prebuilt shared libopus over static" ON)
+option(USE_OPUS_STATIC_PREBUILT_FALLBACK "Allow static libopus fallback when shared is unavailable" ON)
 option(INCOMUDON_CODEC2_RUNTIME_LOADER "Enable runtime libcodec2 loading from app/UI" ON)
 
 if(INCOMUDON_CODEC2_RUNTIME_LOADER)
@@ -72,25 +76,33 @@ if(INCOMUDON_CODEC2_RUNTIME_LOADER)
     set(USE_CODEC2_ANDROID_PREBUILT OFF CACHE BOOL "" FORCE)
     set(USE_CODEC2_WINDOWS_PREBUILT OFF CACHE BOOL "" FORCE)
     set(USE_CODEC2_STATIC_PREBUILT_FALLBACK OFF CACHE BOOL "" FORCE)
-    target_compile_definitions(appIncomUdon PRIVATE INCOMUDON_CODEC2_RUNTIME_LOADER=1)
+    target_compile_definitions(appIncomUdon PRIVATE
+        INCOMUDON_CODEC2_RUNTIME_LOADER=1
+        INCOMUDON_USE_CODEC2=1)
 endif()
 
 set(INCOMUDON_CODEC2_INCLUDE "")
+set(_codec2_include_candidates "")
 if(ANDROID)
-    set(_codec2_include_candidate
+    list(APPEND _codec2_include_candidates
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libcodec2_android/${ANDROID_ABI}/include")
-    if(EXISTS "${_codec2_include_candidate}")
-        set(INCOMUDON_CODEC2_INCLUDE "${_codec2_include_candidate}")
-    endif()
 elseif(WIN32)
-    foreach(_codec2_include_candidate IN ITEMS
+    list(APPEND _codec2_include_candidates
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libcodec2_windows/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libcodec2-windows/include")
-        if(NOT INCOMUDON_CODEC2_INCLUDE AND EXISTS "${_codec2_include_candidate}")
-            set(INCOMUDON_CODEC2_INCLUDE "${_codec2_include_candidate}")
-        endif()
-    endforeach()
 endif()
+foreach(_codec2_include_candidate IN LISTS _codec2_include_candidates)
+    if(INCOMUDON_CODEC2_INCLUDE)
+        break()
+    endif()
+    if(NOT EXISTS "${_codec2_include_candidate}")
+        continue()
+    endif()
+    if(EXISTS "${_codec2_include_candidate}/codec2.h" OR
+       EXISTS "${_codec2_include_candidate}/codec2/codec2.h")
+        set(INCOMUDON_CODEC2_INCLUDE "${_codec2_include_candidate}")
+    endif()
+endforeach()
 
 if(INCOMUDON_CODEC2_INCLUDE)
     target_include_directories(appIncomUdon PRIVATE
@@ -309,6 +321,191 @@ else()
     elseif(USE_CODEC2 AND NOT TARGET codec2)
         message(WARNING "libcodec2 target not found. Falling back to no codec2.")
     endif()
+endif()
+
+# Opus (Android/Windows prebuilt)
+set(INCOMUDON_OPUS_FOUND FALSE)
+
+if(ANDROID AND USE_OPUS_ANDROID_PREBUILT)
+    set(OPUS_ANDROID_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_android")
+    set(OPUS_ANDROID_INCLUDE "${OPUS_ANDROID_ROOT}/${ANDROID_ABI}/include")
+    set(OPUS_ANDROID_LIBDIR "${OPUS_ANDROID_ROOT}/${ANDROID_ABI}/lib")
+    set(OPUS_ANDROID_LIB "")
+    set(OPUS_ANDROID_KIND "")
+
+    if(EXISTS "${OPUS_ANDROID_INCLUDE}" AND EXISTS "${OPUS_ANDROID_LIBDIR}")
+        if(USE_OPUS_SHARED_PREBUILT)
+            foreach(_cand IN ITEMS
+                "${OPUS_ANDROID_LIBDIR}/libopus.so"
+                "${OPUS_ANDROID_LIBDIR}/opus.so")
+                if(NOT OPUS_ANDROID_LIB AND EXISTS "${_cand}")
+                    set(OPUS_ANDROID_LIB "${_cand}")
+                    set(OPUS_ANDROID_KIND "SHARED")
+                endif()
+            endforeach()
+        endif()
+
+        if(USE_OPUS_STATIC_PREBUILT_FALLBACK AND NOT OPUS_ANDROID_LIB)
+            foreach(_cand IN ITEMS
+                "${OPUS_ANDROID_LIBDIR}/libopus.a"
+                "${OPUS_ANDROID_LIBDIR}/opus.a")
+                if(NOT OPUS_ANDROID_LIB AND EXISTS "${_cand}")
+                    set(OPUS_ANDROID_LIB "${_cand}")
+                    set(OPUS_ANDROID_KIND "STATIC")
+                endif()
+            endforeach()
+        endif()
+
+        if(OPUS_ANDROID_LIB)
+            add_library(incomudon_opus ${OPUS_ANDROID_KIND} IMPORTED GLOBAL)
+            set_target_properties(incomudon_opus PROPERTIES
+                IMPORTED_LOCATION "${OPUS_ANDROID_LIB}")
+            target_link_libraries(appIncomUdon PRIVATE incomudon_opus)
+            target_include_directories(appIncomUdon PRIVATE
+                "${OPUS_ANDROID_INCLUDE}"
+                "${OPUS_ANDROID_INCLUDE}/opus")
+            target_compile_definitions(appIncomUdon PRIVATE INCOMUDON_USE_OPUS)
+            if(OPUS_ANDROID_KIND STREQUAL "SHARED")
+                get_target_property(_extra_libs appIncomUdon QT_ANDROID_EXTRA_LIBS)
+                if(NOT _extra_libs)
+                    set(_extra_libs "")
+                endif()
+                list(APPEND _extra_libs "${OPUS_ANDROID_LIB}")
+                set_target_properties(appIncomUdon PROPERTIES
+                    QT_ANDROID_EXTRA_LIBS "${_extra_libs}")
+            endif()
+            message(STATUS "Using Android prebuilt libopus (${OPUS_ANDROID_KIND}): ${OPUS_ANDROID_LIB}")
+            set(INCOMUDON_OPUS_FOUND TRUE)
+        else()
+            message(WARNING "Android prebuilt libopus not found under ${OPUS_ANDROID_LIBDIR}")
+        endif()
+    endif()
+endif()
+
+if(WIN32 AND USE_OPUS_WINDOWS_PREBUILT AND NOT INCOMUDON_OPUS_FOUND)
+    set(OPUS_WIN_ROOT_CANDIDATES "")
+    if(DEFINED ENV{INCOMUDON_OPUS_WINDOWS_ROOT})
+        list(APPEND OPUS_WIN_ROOT_CANDIDATES "$ENV{INCOMUDON_OPUS_WINDOWS_ROOT}")
+    endif()
+    list(APPEND OPUS_WIN_ROOT_CANDIDATES
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows")
+
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        list(APPEND OPUS_WIN_ROOT_CANDIDATES
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/x64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/win64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/amd64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/mingw64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/x64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/win64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/amd64"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/mingw64")
+    else()
+        list(APPEND OPUS_WIN_ROOT_CANDIDATES
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/x86"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/win32"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus_windows/mingw32"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/x86"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/win32"
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libopus-windows/mingw32")
+    endif()
+
+    foreach(_root IN LISTS OPUS_WIN_ROOT_CANDIDATES)
+        if(TARGET incomudon_opus)
+            break()
+        endif()
+        if(NOT EXISTS "${_root}")
+            continue()
+        endif()
+
+        set(_inc "")
+        if(EXISTS "${_root}/include")
+            set(_inc "${_root}/include")
+        endif()
+
+        set(_libdir "")
+        foreach(_cand IN ITEMS
+            "${_root}/lib"
+            "${_root}/lib64"
+            "${_root}/lib/x64"
+            "${_root}/lib/Win32")
+            if(NOT _libdir AND EXISTS "${_cand}")
+                set(_libdir "${_cand}")
+            endif()
+        endforeach()
+
+        set(_lib "")
+        set(_kind "")
+        set(_dll "")
+        set(_implib "")
+
+        if(USE_OPUS_SHARED_PREBUILT)
+            foreach(_cand IN ITEMS
+                "${_root}/bin/libopus.dll"
+                "${_root}/bin/opus.dll"
+                "${_libdir}/libopus.dll"
+                "${_libdir}/opus.dll"
+                "${_root}/libopus.dll"
+                "${_root}/opus.dll")
+                if(NOT _dll AND EXISTS "${_cand}")
+                    set(_dll "${_cand}")
+                endif()
+            endforeach()
+
+            foreach(_cand IN ITEMS
+                "${_libdir}/libopus.dll.a"
+                "${_libdir}/opus.dll.a"
+                "${_libdir}/libopus.lib"
+                "${_libdir}/opus.lib")
+                if(NOT _implib AND EXISTS "${_cand}")
+                    set(_implib "${_cand}")
+                endif()
+            endforeach()
+
+            if(_dll AND _implib)
+                set(_lib "${_implib}")
+                set(_kind "SHARED")
+            endif()
+        endif()
+
+        if(USE_OPUS_STATIC_PREBUILT_FALLBACK AND NOT _lib)
+            foreach(_cand IN ITEMS
+                "${_libdir}/libopus.a"
+                "${_libdir}/libopus.lib"
+                "${_libdir}/opus.lib")
+                if(NOT _lib AND EXISTS "${_cand}")
+                    set(_lib "${_cand}")
+                    set(_kind "STATIC")
+                endif()
+            endforeach()
+        endif()
+
+        if(_inc AND _lib)
+            add_library(incomudon_opus ${_kind} IMPORTED GLOBAL)
+            if(_kind STREQUAL "SHARED")
+                set_target_properties(incomudon_opus PROPERTIES
+                    IMPORTED_IMPLIB "${_lib}"
+                    IMPORTED_LOCATION "${_dll}")
+            else()
+                set_target_properties(incomudon_opus PROPERTIES
+                    IMPORTED_LOCATION "${_lib}")
+            endif()
+            target_link_libraries(appIncomUdon PRIVATE incomudon_opus)
+            target_include_directories(appIncomUdon PRIVATE
+                "${_inc}"
+                "${_inc}/opus")
+            target_compile_definitions(appIncomUdon PRIVATE INCOMUDON_USE_OPUS)
+            if(_kind STREQUAL "SHARED" AND _dll)
+                add_custom_command(TARGET appIncomUdon POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_dll}"
+                    $<TARGET_FILE_DIR:appIncomUdon>)
+            endif()
+            message(STATUS "Using Windows prebuilt libopus (${_kind}): ${_lib}")
+            set(INCOMUDON_OPUS_FOUND TRUE)
+        endif()
+    endforeach()
 endif()
 
 # OpenSSL (Android/Windows prebuilt or host)

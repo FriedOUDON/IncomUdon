@@ -1,6 +1,7 @@
 #include "AppState.h"
 
 #include <QtGlobal>
+#include <QRandomGenerator>
 
 AppState::AppState(QObject* parent)
     : QObject(parent)
@@ -30,6 +31,15 @@ void AppState::setCryptoMode(int mode)
 bool AppState::opensslAvailable() const
 {
 #ifdef INCOMUDON_USE_OPENSSL
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool AppState::opusAvailable() const
+{
+#ifdef INCOMUDON_USE_OPUS
     return true;
 #else
     return false;
@@ -148,19 +158,77 @@ void AppState::setSelfId(quint32 selfId)
     emit selfIdChanged();
 }
 
+quint32 AppState::senderId() const
+{
+    return m_senderId;
+}
+
+void AppState::setSenderId(quint32 senderId)
+{
+    static constexpr quint32 kMinSenderId = 1u;
+    static constexpr quint32 kMaxSenderId = 0x7FFFFFFFu;
+
+    quint32 normalized = senderId;
+    if (senderId < kMinSenderId || senderId > kMaxSenderId)
+    {
+        normalized = QRandomGenerator::global()->bounded(kMinSenderId, kMaxSenderId + 1u);
+    }
+    if (m_senderId == normalized)
+        return;
+
+    m_senderId = normalized;
+    emit senderIdChanged();
+}
+
+int AppState::codecSelection() const
+{
+    return m_codecSelection;
+}
+
+static int normalizeCodecBitrateForSelection(int bitrate, int selection);
+
+void AppState::setCodecSelection(int selection)
+{
+    int normalized = CodecPcm;
+    if (selection == CodecCodec2 || selection == CodecOpus)
+        normalized = selection;
+
+#ifndef INCOMUDON_USE_OPUS
+    if (normalized == CodecOpus)
+        normalized = CodecCodec2;
+#endif
+
+    const bool newForcePcm = (normalized == CodecPcm);
+    const bool selectionChanged = (m_codecSelection != normalized);
+    const bool forceChanged = (m_forcePcm != newForcePcm);
+    const int normalizedBitrate = normalizeCodecBitrateForSelection(m_codecBitrate, normalized);
+    const bool bitrateChanged = (m_codecBitrate != normalizedBitrate);
+    if (!selectionChanged && !forceChanged && !bitrateChanged)
+        return;
+
+    m_codecSelection = normalized;
+    m_forcePcm = newForcePcm;
+    m_codecBitrate = normalizedBitrate;
+    if (selectionChanged)
+        emit codecSelectionChanged();
+    if (forceChanged)
+        emit forcePcmChanged();
+    if (bitrateChanged)
+        emit codecBitrateChanged();
+}
+
 int AppState::codecBitrate() const
 {
     return m_codecBitrate;
 }
 
-static int normalizeCodecBitrate(int bitrate)
+static int nearestOption(int value, const int* options, int count)
 {
-    const int options[] = {450, 700, 1600, 2400, 3200};
     int best = options[0];
-    int bestDiff = qAbs(bitrate - options[0]);
-    for (int i = 1; i < 5; ++i)
+    int bestDiff = qAbs(value - options[0]);
+    for (int i = 1; i < count; ++i)
     {
-        const int diff = qAbs(bitrate - options[i]);
+        const int diff = qAbs(value - options[i]);
         if (diff < bestDiff)
         {
             bestDiff = diff;
@@ -170,9 +238,46 @@ static int normalizeCodecBitrate(int bitrate)
     return best;
 }
 
+static int normalizeCodec2Bitrate(int bitrate)
+{
+    static constexpr int options[] = {450, 700, 1600, 2400, 3200};
+    return nearestOption(bitrate, options, 5);
+}
+
+static int normalizeOpusBitrate(int bitrate)
+{
+    if (bitrate < 6000)
+    {
+        switch (normalizeCodec2Bitrate(bitrate))
+        {
+        case 450:
+            return 6000;
+        case 700:
+            return 8000;
+        case 2400:
+            return 16000;
+        case 3200:
+            return 20000;
+        case 1600:
+        default:
+            return 12000;
+        }
+    }
+
+    static constexpr int options[] = {6000, 8000, 12000, 16000, 20000, 64000, 96000, 128000};
+    return nearestOption(bitrate, options, 8);
+}
+
+static int normalizeCodecBitrateForSelection(int bitrate, int selection)
+{
+    if (selection == AppState::CodecOpus)
+        return normalizeOpusBitrate(bitrate);
+    return normalizeCodec2Bitrate(bitrate);
+}
+
 void AppState::setCodecBitrate(int bitrate)
 {
-    const int normalized = normalizeCodecBitrate(bitrate);
+    const int normalized = normalizeCodecBitrateForSelection(bitrate, m_codecSelection);
     if (m_codecBitrate == normalized)
         return;
 
@@ -187,11 +292,38 @@ bool AppState::forcePcm() const
 
 void AppState::setForcePcm(bool force)
 {
-    if (m_forcePcm == force)
+    const bool normalized = force;
+    int newSelection = m_codecSelection;
+    if (normalized)
+    {
+        newSelection = CodecPcm;
+    }
+    else if (newSelection == CodecPcm)
+    {
+        newSelection = CodecCodec2;
+    }
+
+#ifndef INCOMUDON_USE_OPUS
+    if (newSelection == CodecOpus)
+        newSelection = CodecCodec2;
+#endif
+
+    const int normalizedBitrate = normalizeCodecBitrateForSelection(m_codecBitrate, newSelection);
+    const bool bitrateChanged = (m_codecBitrate != normalizedBitrate);
+    if (m_forcePcm == normalized &&
+        m_codecSelection == newSelection &&
+        !bitrateChanged)
         return;
 
-    m_forcePcm = force;
+    const bool selectionChanged = (m_codecSelection != newSelection);
+    m_forcePcm = normalized;
+    m_codecSelection = newSelection;
+    m_codecBitrate = normalizedBitrate;
     emit forcePcmChanged();
+    if (selectionChanged)
+        emit codecSelectionChanged();
+    if (bitrateChanged)
+        emit codecBitrateChanged();
 }
 
 bool AppState::fecEnabled() const
@@ -321,4 +453,46 @@ void AppState::setCodec2LibraryError(const QString& error)
 
     m_codec2LibraryError = error;
     emit codec2LibraryErrorChanged();
+}
+
+QString AppState::opusLibraryPath() const
+{
+    return m_opusLibraryPath;
+}
+
+void AppState::setOpusLibraryPath(const QString& path)
+{
+    if (m_opusLibraryPath == path)
+        return;
+
+    m_opusLibraryPath = path;
+    emit opusLibraryPathChanged();
+}
+
+bool AppState::opusLibraryLoaded() const
+{
+    return m_opusLibraryLoaded;
+}
+
+void AppState::setOpusLibraryLoaded(bool loaded)
+{
+    if (m_opusLibraryLoaded == loaded)
+        return;
+
+    m_opusLibraryLoaded = loaded;
+    emit opusLibraryLoadedChanged();
+}
+
+QString AppState::opusLibraryError() const
+{
+    return m_opusLibraryError;
+}
+
+void AppState::setOpusLibraryError(const QString& error)
+{
+    if (m_opusLibraryError == error)
+        return;
+
+    m_opusLibraryError = error;
+    emit opusLibraryErrorChanged();
 }

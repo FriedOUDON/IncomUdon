@@ -26,10 +26,10 @@ enum PacketType : quint8 {
     PKT_FEC          = 0x0C
 };
 
-enum CodecId : quint8 {
-    CODEC_CODEC2_1600 = 0x01,
-    CODEC_CODEC2_2400 = 0x02,
-    CODEC_CODEC2_3200 = 0x03
+enum CodecTransportId : quint8 {
+    CODEC_TRANSPORT_PCM = 0x00,
+    CODEC_TRANSPORT_CODEC2 = 0x01,
+    CODEC_TRANSPORT_OPUS = 0x02
 };
 
 struct PacketHeader {

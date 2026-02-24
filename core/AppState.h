@@ -14,6 +14,9 @@ class AppState : public QObject
     Q_PROPERTY(bool opensslAvailable
                READ opensslAvailable
                CONSTANT)
+    Q_PROPERTY(bool opusAvailable
+               READ opusAvailable
+               CONSTANT)
     Q_PROPERTY(int currentChannelId
                READ currentChannelId
                WRITE setCurrentChannelId
@@ -46,6 +49,14 @@ class AppState : public QObject
                READ selfId
                WRITE setSelfId
                NOTIFY selfIdChanged)
+    Q_PROPERTY(quint32 senderId
+               READ senderId
+               WRITE setSenderId
+               NOTIFY senderIdChanged)
+    Q_PROPERTY(int codecSelection
+               READ codecSelection
+               WRITE setCodecSelection
+               NOTIFY codecSelectionChanged)
     Q_PROPERTY(int codecBitrate
                READ codecBitrate
                WRITE setCodecBitrate
@@ -90,6 +101,18 @@ class AppState : public QObject
                READ codec2LibraryError
                WRITE setCodec2LibraryError
                NOTIFY codec2LibraryErrorChanged)
+    Q_PROPERTY(QString opusLibraryPath
+               READ opusLibraryPath
+               WRITE setOpusLibraryPath
+               NOTIFY opusLibraryPathChanged)
+    Q_PROPERTY(bool opusLibraryLoaded
+               READ opusLibraryLoaded
+               WRITE setOpusLibraryLoaded
+               NOTIFY opusLibraryLoadedChanged)
+    Q_PROPERTY(QString opusLibraryError
+               READ opusLibraryError
+               WRITE setOpusLibraryError
+               NOTIFY opusLibraryErrorChanged)
 
 public:
     enum CryptoMode {
@@ -98,11 +121,19 @@ public:
     };
     Q_ENUM(CryptoMode)
 
+    enum CodecSelection {
+        CodecPcm = 0,
+        CodecCodec2 = 1,
+        CodecOpus = 2
+    };
+    Q_ENUM(CodecSelection)
+
     explicit AppState(QObject* parent = nullptr);
 
     int cryptoMode() const;
     void setCryptoMode(int mode);
     bool opensslAvailable() const;
+    bool opusAvailable() const;
 
     int currentChannelId() const;
     void setCurrentChannelId(int channelId);
@@ -127,6 +158,10 @@ public:
 
     quint32 selfId() const;
     void setSelfId(quint32 selfId);
+    quint32 senderId() const;
+    void setSenderId(quint32 senderId);
+    int codecSelection() const;
+    void setCodecSelection(int selection);
 
     int codecBitrate() const;
     void setCodecBitrate(int bitrate);
@@ -150,6 +185,12 @@ public:
     void setCodec2LibraryLoaded(bool loaded);
     QString codec2LibraryError() const;
     void setCodec2LibraryError(const QString& error);
+    QString opusLibraryPath() const;
+    void setOpusLibraryPath(const QString& path);
+    bool opusLibraryLoaded() const;
+    void setOpusLibraryLoaded(bool loaded);
+    QString opusLibraryError() const;
+    void setOpusLibraryError(const QString& error);
 
 signals:
     void cryptoModeChanged();
@@ -161,6 +202,8 @@ signals:
     void talkerIdChanged();
     void serverOnlineChanged();
     void selfIdChanged();
+    void senderIdChanged();
+    void codecSelectionChanged();
     void codecBitrateChanged();
     void forcePcmChanged();
     void fecEnabledChanged();
@@ -172,6 +215,9 @@ signals:
     void codec2LibraryPathChanged();
     void codec2LibraryLoadedChanged();
     void codec2LibraryErrorChanged();
+    void opusLibraryPathChanged();
+    void opusLibraryLoadedChanged();
+    void opusLibraryErrorChanged();
 
 private:
     int m_cryptoMode =
@@ -188,6 +234,8 @@ private:
     quint32 m_talkerId = 0;
     bool m_serverOnline = false;
     quint32 m_selfId = 0;
+    quint32 m_senderId = 0;
+    int m_codecSelection = CodecPcm;
     int m_codecBitrate = 1600;
     bool m_forcePcm = true;
     bool m_fecEnabled = true;
@@ -199,4 +247,7 @@ private:
     QString m_codec2LibraryPath;
     bool m_codec2LibraryLoaded = false;
     QString m_codec2LibraryError;
+    QString m_opusLibraryPath;
+    bool m_opusLibraryLoaded = false;
+    QString m_opusLibraryError;
 };

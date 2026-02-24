@@ -488,11 +488,25 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
         {
             const quint8 flags = static_cast<quint8>(parsed.encryptedPayload.at(0));
             const bool pcmOnly = (flags & 0x01) != 0;
-            const quint16 mode = qFromBigEndian<quint16>(
-                reinterpret_cast<const uchar*>(parsed.encryptedPayload.constData() + 1));
+            int codecId = Proto::CODEC_TRANSPORT_CODEC2;
+            quint16 mode = 1600;
+            if (parsed.encryptedPayload.size() >= 4)
+            {
+                codecId = static_cast<quint8>(parsed.encryptedPayload.at(1));
+                mode = qFromBigEndian<quint16>(
+                    reinterpret_cast<const uchar*>(parsed.encryptedPayload.constData() + 2));
+            }
+            else
+            {
+                mode = qFromBigEndian<quint16>(
+                    reinterpret_cast<const uchar*>(parsed.encryptedPayload.constData() + 1));
+            }
+            if (pcmOnly)
+                codecId = Proto::CODEC_TRANSPORT_PCM;
             emit codecConfigReceived(parsed.header.senderId,
                                      static_cast<int>(mode),
-                                     pcmOnly);
+                                     pcmOnly,
+                                     codecId);
         }
         return;
     }

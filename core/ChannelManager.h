@@ -73,7 +73,7 @@ signals:
     void talkReleasePlayoutCompleted(quint32 talkerId);
     void talkDenied(quint32 currentTalkerId);
     void handshakeReceived(const QByteArray& payload);
-    void codecConfigReceived(quint32 senderId, int codecMode, bool pcmOnly);
+    void codecConfigReceived(quint32 senderId, int codecMode, bool pcmOnly, int codecId);
     void channelConfigured(quint32 channelId,
                            const QString& address,
                            quint16 port,

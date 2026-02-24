@@ -1,4 +1,5 @@
 #include "Codec2Wrapper.h"
+#include "net/packet.h"
 
 #include <QtGlobal>
 #include <QDir>
@@ -11,18 +12,148 @@
 #include <cstdio>
 #include <cstring>
 
+namespace
+{
+QString normalizeDynamicLibraryPath(const QString& path, QString* error);
+}
+
 #if defined(Q_OS_ANDROID)
 #include <android/log.h>
 #include <QJniEnvironment>
 #include <QJniObject>
 #endif
 
-#ifdef INCOMUDON_USE_CODEC2
-#include "codec2.h"
+#ifdef INCOMUDON_USE_OPUS
+void Codec2Wrapper::unloadOpusLibrary()
+{
+    if (!m_opusLibrary)
+        return;
+    if (m_opusLibrary->isLoaded())
+        m_opusLibrary->unload();
+}
+
+void Codec2Wrapper::clearOpusApi()
+{
+    m_opusEncoderCreate = nullptr;
+    m_opusEncoderDestroy = nullptr;
+    m_opusEncode = nullptr;
+    m_opusEncoderCtl = nullptr;
+    m_opusDecoderCreate = nullptr;
+    m_opusDecoderDestroy = nullptr;
+    m_opusDecode = nullptr;
+}
+
+QString Codec2Wrapper::normalizeOpusLibraryPath(const QString& path, QString* error) const
+{
+    return normalizeDynamicLibraryPath(path, error);
+}
+
+void Codec2Wrapper::setOpusLibraryLoadedInternal(bool loaded)
+{
+    if (m_opusLibraryLoaded == loaded)
+        return;
+    m_opusLibraryLoaded = loaded;
+    emit opusLibraryLoadedChanged();
+}
+
+void Codec2Wrapper::setOpusLibraryErrorInternal(const QString& error)
+{
+    if (m_opusLibraryError == error)
+        return;
+    m_opusLibraryError = error;
+    emit opusLibraryErrorChanged();
+}
+
+void Codec2Wrapper::refreshOpusLibrary()
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    if (!m_opusLibrary)
+        return;
+
+    clearOpusApi();
+    unloadOpusLibrary();
+
+    const bool explicitPath = !m_opusLibraryPath.trimmed().isEmpty();
+    QString normalizedError;
+    const QString normalizedPath = normalizeOpusLibraryPath(m_opusLibraryPath, &normalizedError);
+    if (explicitPath && normalizedPath.isEmpty())
+    {
+        setOpusLibraryLoadedInternal(false);
+        if (normalizedError.isEmpty())
+            normalizedError = QStringLiteral("Invalid opus library path");
+        setOpusLibraryErrorInternal(normalizedError);
+        return;
+    }
+
+    // Runtime loading is optional and used only when user specifies a path.
+    if (!explicitPath)
+    {
+        setOpusLibraryLoadedInternal(false);
+        setOpusLibraryErrorInternal(QString());
+        return;
+    }
+
+    m_opusLibrary->setFileName(normalizedPath);
+    if (!m_opusLibrary->load())
+    {
+        setOpusLibraryLoadedInternal(false);
+        setOpusLibraryErrorInternal(QStringLiteral("Failed to load opus library: %1")
+                                        .arg(m_opusLibrary->errorString()));
+        return;
+    }
+
+    m_opusEncoderCreate = reinterpret_cast<OpusEncoderCreateFn>(
+        m_opusLibrary->resolve("opus_encoder_create"));
+    m_opusEncoderDestroy = reinterpret_cast<OpusEncoderDestroyFn>(
+        m_opusLibrary->resolve("opus_encoder_destroy"));
+    m_opusEncode = reinterpret_cast<OpusEncodeFn>(
+        m_opusLibrary->resolve("opus_encode"));
+    m_opusEncoderCtl = reinterpret_cast<OpusEncoderCtlFn>(
+        m_opusLibrary->resolve("opus_encoder_ctl"));
+    m_opusDecoderCreate = reinterpret_cast<OpusDecoderCreateFn>(
+        m_opusLibrary->resolve("opus_decoder_create"));
+    m_opusDecoderDestroy = reinterpret_cast<OpusDecoderDestroyFn>(
+        m_opusLibrary->resolve("opus_decoder_destroy"));
+    m_opusDecode = reinterpret_cast<OpusDecodeFn>(
+        m_opusLibrary->resolve("opus_decode"));
+
+    const bool symbolsOk = m_opusEncoderCreate &&
+                           m_opusEncoderDestroy &&
+                           m_opusEncode &&
+                           m_opusEncoderCtl &&
+                           m_opusDecoderCreate &&
+                           m_opusDecoderDestroy &&
+                           m_opusDecode;
+    if (symbolsOk)
+    {
+        setOpusLibraryLoadedInternal(true);
+        setOpusLibraryErrorInternal(QString());
+        return;
+    }
+
+    clearOpusApi();
+    unloadOpusLibrary();
+    setOpusLibraryLoadedInternal(false);
+    setOpusLibraryErrorInternal(
+        QStringLiteral("Required opus symbols were not found in: %1").arg(normalizedPath));
+}
+#endif
+
+#ifdef INCOMUDON_USE_OPUS
+#include <opus/opus.h>
 #endif
 
 namespace
 {
+#ifdef INCOMUDON_USE_CODEC2
+// Keep local mode constants so build does not depend on codec2 public headers.
+constexpr int kCodec2Mode3200 = 0;
+constexpr int kCodec2Mode2400 = 1;
+constexpr int kCodec2Mode1600 = 2;
+constexpr int kCodec2Mode700C = 8;
+constexpr int kCodec2Mode450 = 10;
+#endif
+
 #ifdef INCOMUDON_USE_CODEC2
 QRecursiveMutex& codec2ApiMutex()
 {
@@ -85,6 +216,33 @@ QString copyAndroidContentUriToLocalPath(const QString& uriText, QString* error)
     return QDir::toNativeSeparators(localPath);
 }
 #endif
+
+QString normalizeDynamicLibraryPath(const QString& path, QString* error)
+{
+    if (error)
+        error->clear();
+
+    const QString trimmed = path.trimmed();
+    if (trimmed.isEmpty())
+        return QString();
+
+    const QUrl url(trimmed);
+    if (url.isValid())
+    {
+        const QString scheme = url.scheme().toLower();
+        if (scheme == QStringLiteral("file"))
+            return QDir::toNativeSeparators(url.toLocalFile());
+#if defined(Q_OS_ANDROID)
+        if (scheme == QStringLiteral("content"))
+            return copyAndroidContentUriToLocalPath(trimmed, error);
+#endif
+    }
+#if defined(Q_OS_ANDROID)
+    if (trimmed.startsWith(QStringLiteral("content://"), Qt::CaseInsensitive))
+        return copyAndroidContentUriToLocalPath(trimmed, error);
+#endif
+    return QDir::toNativeSeparators(trimmed);
+}
 }
 
 Codec2Wrapper::Codec2Wrapper(QObject* parent)
@@ -97,6 +255,12 @@ Codec2Wrapper::Codec2Wrapper(QObject* parent)
 #else
     m_codec2LibraryError = QStringLiteral("Codec2 support disabled at build time");
     logCodec2Status("INCOMUDON_USE_CODEC2=0 (disabled at build time)");
+#endif
+#ifdef INCOMUDON_USE_OPUS
+    m_opusLibrary = new QLibrary(this);
+    refreshOpusLibrary();
+#else
+    m_opusLibraryError = QStringLiteral("Opus support disabled at build time");
 #endif
     updateCodec();
 }
@@ -115,6 +279,54 @@ Codec2Wrapper::~Codec2Wrapper()
     delete m_codec2Library;
     m_codec2Library = nullptr;
 #endif
+#ifdef INCOMUDON_USE_OPUS
+    if (m_opusEncoder)
+    {
+        if (m_opusUsingRuntimeApi && m_opusEncoderDestroy)
+            m_opusEncoderDestroy(m_opusEncoder);
+        else
+            opus_encoder_destroy(m_opusEncoder);
+        m_opusEncoder = nullptr;
+    }
+    if (m_opusDecoder)
+    {
+        if (m_opusUsingRuntimeApi && m_opusDecoderDestroy)
+            m_opusDecoderDestroy(m_opusDecoder);
+        else
+            opus_decoder_destroy(m_opusDecoder);
+        m_opusDecoder = nullptr;
+    }
+    m_opusUsingRuntimeApi = false;
+    unloadOpusLibrary();
+    delete m_opusLibrary;
+    m_opusLibrary = nullptr;
+#endif
+}
+
+int Codec2Wrapper::codecType() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    return m_codecType;
+}
+
+void Codec2Wrapper::setCodecType(int type)
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    int normalized = CodecTypeCodec2;
+    if (type == CodecTypeOpus)
+        normalized = CodecTypeOpus;
+
+#ifndef INCOMUDON_USE_OPUS
+    if (normalized == CodecTypeOpus)
+        normalized = CodecTypeCodec2;
+#endif
+
+    if (m_codecType == normalized)
+        return;
+
+    m_codecType = normalized;
+    updateCodec();
+    emit codecTypeChanged();
 }
 
 int Codec2Wrapper::mode() const
@@ -186,6 +398,63 @@ bool Codec2Wrapper::codec2Active() const
     return m_codec2Active;
 }
 
+bool Codec2Wrapper::opusActive() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    return m_opusActive;
+}
+
+QString Codec2Wrapper::opusLibraryPath() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    return m_opusLibraryPath;
+}
+
+void Codec2Wrapper::setOpusLibraryPath(const QString& path)
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    if (m_opusLibraryPath == path)
+        return;
+
+    m_opusLibraryPath = path;
+    emit opusLibraryPathChanged();
+
+#ifdef INCOMUDON_USE_OPUS
+    refreshOpusLibrary();
+#else
+    if (m_opusLibraryError != QStringLiteral("Opus support disabled at build time"))
+    {
+        m_opusLibraryError = QStringLiteral("Opus support disabled at build time");
+        emit opusLibraryErrorChanged();
+    }
+#endif
+    updateCodec();
+}
+
+bool Codec2Wrapper::opusLibraryLoaded() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    return m_opusLibraryLoaded;
+}
+
+QString Codec2Wrapper::opusLibraryError() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    return m_opusLibraryError;
+}
+
+int Codec2Wrapper::activeCodecTransportId() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    if (m_forcePcm)
+        return Proto::CODEC_TRANSPORT_PCM;
+    if (m_opusActive)
+        return Proto::CODEC_TRANSPORT_OPUS;
+    if (m_codec2Active)
+        return Proto::CODEC_TRANSPORT_CODEC2;
+    return Proto::CODEC_TRANSPORT_PCM;
+}
+
 QString Codec2Wrapper::codec2LibraryPath() const
 {
     QMutexLocker<QRecursiveMutex> locker(&m_mutex);
@@ -229,8 +498,39 @@ QString Codec2Wrapper::codec2LibraryError() const
 QByteArray Codec2Wrapper::encode(const QByteArray& pcmFrame) const
 {
     QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    if (m_forcePcm || m_pcmFrameBytes <= 0)
+        return pcmFrame;
+
+#ifdef INCOMUDON_USE_OPUS
+    if (m_opusActive && m_codecType == CodecTypeOpus && m_opusEncoder)
+    {
+        const int expectedSamples = m_pcmFrameBytes / static_cast<int>(sizeof(opus_int16));
+        QVector<opus_int16> inputSamples(expectedSamples, 0);
+        const int copyBytes = qMin(pcmFrame.size(), m_pcmFrameBytes);
+        if (copyBytes > 0)
+            std::memcpy(inputSamples.data(), pcmFrame.constData(), copyBytes);
+
+        QByteArray output(512, 0);
+        const int encodedBytes = (m_opusUsingRuntimeApi && m_opusEncode)
+            ? m_opusEncode(m_opusEncoder,
+                           inputSamples.constData(),
+                           expectedSamples,
+                           reinterpret_cast<unsigned char*>(output.data()),
+                           output.size())
+            : opus_encode(m_opusEncoder,
+                          inputSamples.constData(),
+                          expectedSamples,
+                          reinterpret_cast<unsigned char*>(output.data()),
+                          output.size());
+        if (encodedBytes <= 0)
+            return QByteArray();
+        output.truncate(encodedBytes);
+        return output;
+    }
+#endif
+
 #ifdef INCOMUDON_USE_CODEC2
-    if (m_forcePcm || !m_codec || !m_codec2Encode || m_frameBytes <= 0 || m_pcmFrameBytes <= 0)
+    if (!m_codec || !m_codec2Encode || m_frameBytes <= 0)
         return pcmFrame;
 
     const int samples = m_pcmFrameBytes / static_cast<int>(sizeof(short));
@@ -257,8 +557,48 @@ QByteArray Codec2Wrapper::encode(const QByteArray& pcmFrame) const
 QByteArray Codec2Wrapper::decode(const QByteArray& codecFrame) const
 {
     QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    if (m_forcePcm || m_pcmFrameBytes <= 0)
+        return codecFrame;
+
+#ifdef INCOMUDON_USE_OPUS
+    if (m_opusActive && m_codecType == CodecTypeOpus && m_opusDecoder)
+    {
+        const int expectedSamples = m_pcmFrameBytes / static_cast<int>(sizeof(opus_int16));
+        QVector<opus_int16> outputSamples(expectedSamples, 0);
+        const int decodedSamples = (m_opusUsingRuntimeApi && m_opusDecode)
+            ? m_opusDecode(
+                m_opusDecoder,
+                codecFrame.isEmpty()
+                    ? nullptr
+                    : reinterpret_cast<const unsigned char*>(codecFrame.constData()),
+                codecFrame.size(),
+                outputSamples.data(),
+                expectedSamples,
+                0)
+            : opus_decode(
+                m_opusDecoder,
+                codecFrame.isEmpty()
+                    ? nullptr
+                    : reinterpret_cast<const unsigned char*>(codecFrame.constData()),
+                codecFrame.size(),
+                outputSamples.data(),
+                expectedSamples,
+                0);
+
+        QByteArray output(m_pcmFrameBytes, 0);
+        if (decodedSamples <= 0)
+            return output;
+
+        const int copySamples = qMin(decodedSamples, expectedSamples);
+        const int copyBytes = copySamples * static_cast<int>(sizeof(opus_int16));
+        if (copyBytes > 0)
+            std::memcpy(output.data(), outputSamples.constData(), copyBytes);
+        return output;
+    }
+#endif
+
 #ifdef INCOMUDON_USE_CODEC2
-    if (m_forcePcm || !m_codec || !m_codec2Decode || m_frameBytes <= 0 || m_pcmFrameBytes <= 0)
+    if (!m_codec || !m_codec2Decode || m_frameBytes <= 0)
         return codecFrame;
 
     QByteArray input = codecFrame;
@@ -285,6 +625,7 @@ QByteArray Codec2Wrapper::decode(const QByteArray& codecFrame) const
 void Codec2Wrapper::updateCodec()
 {
     QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+
 #ifdef INCOMUDON_USE_CODEC2
     if (m_codec && m_codec2Destroy)
     {
@@ -292,35 +633,163 @@ void Codec2Wrapper::updateCodec()
         m_codec2Destroy(m_codec);
         m_codec = nullptr;
     }
+#endif
+#ifdef INCOMUDON_USE_OPUS
+    if (m_opusEncoder)
+    {
+        if (m_opusUsingRuntimeApi && m_opusEncoderDestroy)
+            m_opusEncoderDestroy(m_opusEncoder);
+        else
+            opus_encoder_destroy(m_opusEncoder);
+        m_opusEncoder = nullptr;
+    }
+    if (m_opusDecoder)
+    {
+        if (m_opusUsingRuntimeApi && m_opusDecoderDestroy)
+            m_opusDecoderDestroy(m_opusDecoder);
+        else
+            opus_decoder_destroy(m_opusDecoder);
+        m_opusDecoder = nullptr;
+    }
+    m_opusUsingRuntimeApi = false;
+#endif
 
-    bool shouldUseCodec2 = !m_forcePcm;
-    int codecMode = CODEC2_MODE_1600;
-    if (shouldUseCodec2)
+    const bool shouldUseCodec = !m_forcePcm;
+    const bool requestOpus = shouldUseCodec && (m_codecType == CodecTypeOpus);
+    const bool requestCodec2 = shouldUseCodec && !requestOpus;
+
+#ifdef INCOMUDON_USE_OPUS
+    if (requestOpus)
+    {
+        if (!m_opusLibraryPath.trimmed().isEmpty() && !m_opusLibraryLoaded)
+            refreshOpusLibrary();
+
+        const bool useRuntimeApi = m_opusLibraryLoaded &&
+                                   m_opusEncoderCreate &&
+                                   m_opusDecoderCreate &&
+                                   m_opusEncoderDestroy &&
+                                   m_opusDecoderDestroy &&
+                                   m_opusEncode &&
+                                   m_opusDecode &&
+                                   m_opusEncoderCtl;
+        int encErr = 0;
+        int decErr = 0;
+        if (useRuntimeApi)
+        {
+            m_opusEncoder = m_opusEncoderCreate(8000, 1, OPUS_APPLICATION_VOIP, &encErr);
+            m_opusDecoder = m_opusDecoderCreate(8000, 1, &decErr);
+            m_opusUsingRuntimeApi = true;
+        }
+        else
+        {
+            m_opusEncoder = opus_encoder_create(8000, 1, OPUS_APPLICATION_VOIP, &encErr);
+            m_opusDecoder = opus_decoder_create(8000, 1, &decErr);
+            m_opusUsingRuntimeApi = false;
+        }
+        if (m_opusEncoder && m_opusDecoder &&
+            encErr == OPUS_OK && decErr == OPUS_OK)
+        {
+            const int bitrate = opusBitrateForMode(m_mode);
+            if (m_opusUsingRuntimeApi && m_opusEncoderCtl)
+            {
+                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_BITRATE(bitrate));
+                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_VBR(0));
+                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_DTX(0));
+                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_COMPLEXITY(5));
+            }
+            else
+            {
+                opus_encoder_ctl(m_opusEncoder, OPUS_SET_BITRATE(bitrate));
+                opus_encoder_ctl(m_opusEncoder, OPUS_SET_VBR(0));
+                opus_encoder_ctl(m_opusEncoder, OPUS_SET_DTX(0));
+                opus_encoder_ctl(m_opusEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+                opus_encoder_ctl(m_opusEncoder, OPUS_SET_COMPLEXITY(5));
+            }
+
+            const int targetFrameBytes = qBound(8, bitrate / 400, 512);
+            if (m_frameBytes != targetFrameBytes)
+            {
+                m_frameBytes = targetFrameBytes;
+                emit frameBytesChanged();
+            }
+            if (m_pcmFrameBytes != 320)
+            {
+                m_pcmFrameBytes = 320;
+                emit pcmFrameBytesChanged();
+            }
+            if (m_frameMs != 20)
+            {
+                m_frameMs = 20;
+                emit frameMsChanged();
+            }
+            if (!m_opusActive)
+            {
+                m_opusActive = true;
+                emit opusActiveChanged();
+            }
+            if (m_codec2Active)
+            {
+                m_codec2Active = false;
+                emit codec2ActiveChanged();
+            }
+            return;
+        }
+
+        logCodec2Status("Opus init failed encErr=%d decErr=%d (requested bitrate=%d path=%s loaded=%d).",
+                        encErr,
+                        decErr,
+                        m_mode,
+                        m_opusLibraryPath.toUtf8().constData(),
+                        m_opusLibraryLoaded ? 1 : 0);
+        if (m_opusEncoder)
+        {
+            if (m_opusUsingRuntimeApi && m_opusEncoderDestroy)
+                m_opusEncoderDestroy(m_opusEncoder);
+            else
+                opus_encoder_destroy(m_opusEncoder);
+            m_opusEncoder = nullptr;
+        }
+        if (m_opusDecoder)
+        {
+            if (m_opusUsingRuntimeApi && m_opusDecoderDestroy)
+                m_opusDecoderDestroy(m_opusDecoder);
+            else
+                opus_decoder_destroy(m_opusDecoder);
+            m_opusDecoder = nullptr;
+        }
+        m_opusUsingRuntimeApi = false;
+    }
+#endif
+
+#ifdef INCOMUDON_USE_CODEC2
+    int codecMode = kCodec2Mode1600;
+    if (requestCodec2)
     {
         switch (m_mode)
         {
         case 450:
-            codecMode = CODEC2_MODE_450;
+            codecMode = kCodec2Mode450;
             break;
         case 700:
-            codecMode = CODEC2_MODE_700C;
+            codecMode = kCodec2Mode700C;
             break;
         case 2400:
-            codecMode = CODEC2_MODE_2400;
+            codecMode = kCodec2Mode2400;
             break;
         case 3200:
-            codecMode = CODEC2_MODE_3200;
+            codecMode = kCodec2Mode3200;
             break;
         default:
-            codecMode = CODEC2_MODE_1600;
+            codecMode = kCodec2Mode1600;
             break;
         }
     }
 
-    if (shouldUseCodec2 && !m_codec2LibraryLoaded)
+    if (requestCodec2 && !m_codec2LibraryLoaded)
         refreshCodec2Library();
 
-    if (shouldUseCodec2 && m_codec2LibraryLoaded &&
+    if (requestCodec2 && m_codec2LibraryLoaded &&
         m_codec2Create && m_codec2BitsPerFrame && m_codec2SamplesPerFrame)
     {
         int bitsPerFrame = 0;
@@ -371,6 +840,11 @@ void Codec2Wrapper::updateCodec()
                         m_codec2Active = true;
                         emit codec2ActiveChanged();
                     }
+                    if (m_opusActive)
+                    {
+                        m_opusActive = false;
+                        emit opusActiveChanged();
+                    }
 
                     if (m_frameBytes != newFrameBytes)
                     {
@@ -393,10 +867,8 @@ void Codec2Wrapper::updateCodec()
         }
         logCodec2Status("codec2_create failed for mode=%d (requested bitrate=%d).", codecMode, m_mode);
     }
-#endif
 
-#ifdef INCOMUDON_USE_CODEC2
-    if (!m_forcePcm)
+    if (requestCodec2)
     {
         if (!m_codec2LibraryError.isEmpty())
             logCodec2Status("Falling back to PCM: %s", m_codec2LibraryError.toUtf8().constData());
@@ -405,10 +877,20 @@ void Codec2Wrapper::updateCodec()
     }
 #endif
 
+#ifndef INCOMUDON_USE_OPUS
+    if (requestOpus)
+        logCodec2Status("Falling back to PCM: Opus support disabled at build time.");
+#endif
+
     if (m_codec2Active)
     {
         m_codec2Active = false;
         emit codec2ActiveChanged();
+    }
+    if (m_opusActive)
+    {
+        m_opusActive = false;
+        emit opusActiveChanged();
     }
     const int fallbackPcm = 320;
     if (m_pcmFrameBytes != fallbackPcm)
@@ -445,6 +927,41 @@ int Codec2Wrapper::normalizeMode(int mode) const
     return best;
 }
 
+int Codec2Wrapper::opusBitrateForMode(int mode) const
+{
+    if (mode >= 6000)
+    {
+        static constexpr int options[] = {6000, 8000, 12000, 16000, 20000, 64000, 96000, 128000};
+        int best = options[0];
+        int bestDiff = qAbs(mode - options[0]);
+        for (int i = 1; i < 8; ++i)
+        {
+            const int diff = qAbs(mode - options[i]);
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                best = options[i];
+            }
+        }
+        return best;
+    }
+
+    switch (normalizeMode(mode))
+    {
+    case 450:
+        return 6000;
+    case 700:
+        return 8000;
+    case 2400:
+        return 16000;
+    case 3200:
+        return 20000;
+    case 1600:
+    default:
+        return 12000;
+    }
+}
+
 #ifdef INCOMUDON_USE_CODEC2
 void Codec2Wrapper::unloadCodec2Library()
 {
@@ -466,29 +983,7 @@ void Codec2Wrapper::clearCodec2Api()
 
 QString Codec2Wrapper::normalizeLibraryPath(const QString& path, QString* error) const
 {
-    if (error)
-        error->clear();
-
-    const QString trimmed = path.trimmed();
-    if (trimmed.isEmpty())
-        return QString();
-
-    const QUrl url(trimmed);
-    if (url.isValid())
-    {
-        const QString scheme = url.scheme().toLower();
-        if (scheme == QStringLiteral("file"))
-            return QDir::toNativeSeparators(url.toLocalFile());
-#if defined(Q_OS_ANDROID)
-        if (scheme == QStringLiteral("content"))
-            return copyAndroidContentUriToLocalPath(trimmed, error);
-#endif
-    }
-#if defined(Q_OS_ANDROID)
-    if (trimmed.startsWith(QStringLiteral("content://"), Qt::CaseInsensitive))
-        return copyAndroidContentUriToLocalPath(trimmed, error);
-#endif
-    return QDir::toNativeSeparators(trimmed);
+    return normalizeDynamicLibraryPath(path, error);
 }
 
 void Codec2Wrapper::setCodec2LibraryLoadedInternal(bool loaded)

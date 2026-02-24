@@ -63,12 +63,13 @@ int main(int argc, char *argv[])
     quint16 currentServerPort = 0;
     bool suppressCodecBroadcast = false;
     int lastSentCodecMode = -1;
-    int lastSentPcmOnly = -1;
+    int lastSentCodecId = -1;
     quint32 lastRxConfigSender = 0;
     int lastRxConfigMode = -1;
-    int lastRxConfigPcmOnly = -1;
+    int lastRxConfigCodecId = -1;
     QHostAddress lastSentAddress;
     quint16 lastSentPort = 0;
+    std::function<void(bool)> sendCodecConfig = [](bool) {};
     QElapsedTimer lastHandshakeTimer;
     QByteArray lastHandshakePayload;
     bool txActive = false;
@@ -278,9 +279,21 @@ int main(int argc, char *argv[])
         }
     };
 
+    auto applyCodecSelection = [&codecTx, &appState]() {
+        if (appState.codecSelection() == AppState::CodecOpus)
+            codecTx.setCodecType(Codec2Wrapper::CodecTypeOpus);
+        else
+            codecTx.setCodecType(Codec2Wrapper::CodecTypeCodec2);
+        codecTx.setForcePcm(appState.forcePcm());
+    };
+
     auto syncCodec2LibraryState = [&appState, &codecTx]() {
         appState.setCodec2LibraryLoaded(codecTx.codec2LibraryLoaded());
         appState.setCodec2LibraryError(codecTx.codec2LibraryError());
+    };
+    auto syncOpusLibraryState = [&appState, &codecTx]() {
+        appState.setOpusLibraryLoaded(codecTx.opusLibraryLoaded());
+        appState.setOpusLibraryError(codecTx.opusLibraryError());
     };
 
     QObject::connect(&appState, &AppState::codec2LibraryPathChanged,
@@ -288,6 +301,12 @@ int main(int argc, char *argv[])
         const QString path = appState.codec2LibraryPath();
         codecTx.setCodec2LibraryPath(path);
         codecRx.setCodec2LibraryPath(path);
+    });
+    QObject::connect(&appState, &AppState::opusLibraryPathChanged,
+                     &appState, [&appState, &codecTx, &codecRx]() {
+        const QString path = appState.opusLibraryPath();
+        codecTx.setOpusLibraryPath(path);
+        codecRx.setOpusLibraryPath(path);
     });
 
     QObject::connect(&codecTx, &Codec2Wrapper::codec2LibraryLoadedChanged,
@@ -300,6 +319,14 @@ int main(int argc, char *argv[])
                      &appState, [&syncCodec2LibraryState]() {
         syncCodec2LibraryState();
     });
+    QObject::connect(&codecTx, &Codec2Wrapper::opusLibraryLoadedChanged,
+                     &appState, [&syncOpusLibraryState]() {
+        syncOpusLibraryState();
+    });
+    QObject::connect(&codecTx, &Codec2Wrapper::opusLibraryErrorChanged,
+                     &appState, [&syncOpusLibraryState]() {
+        syncOpusLibraryState();
+    });
     QObject::connect(&codecTx, &Codec2Wrapper::pcmFrameBytesChanged,
                      &appState, applyCodecSettings);
     QObject::connect(&codecTx, &Codec2Wrapper::frameMsChanged,
@@ -308,19 +335,32 @@ int main(int argc, char *argv[])
     QObject::connect(&appState, &AppState::codecBitrateChanged,
                      &appState, [&applyCodecSettings, &codecTx]() {
         applyCodecSettings();
-        logCodecStatus(QStringLiteral("TX codec mode=%1 forcePcm=%2 codec2Active=%3")
+        logCodecStatus(QStringLiteral("TX codec mode=%1 forcePcm=%2 codec2Active=%3 opusActive=%4")
                            .arg(codecTx.mode())
                            .arg(codecTx.forcePcm() ? 1 : 0)
-                           .arg(codecTx.codec2Active() ? 1 : 0));
+                           .arg(codecTx.codec2Active() ? 1 : 0)
+                           .arg(codecTx.opusActive() ? 1 : 0));
+    });
+
+    QObject::connect(&appState, &AppState::codecSelectionChanged,
+                     &appState, [&applyCodecSelection, &codecTx, &sendCodecConfig]() {
+        applyCodecSelection();
+        sendCodecConfig(true);
+        logCodecStatus(QStringLiteral("TX codec selection changed type=%1 forcePcm=%2 codec2Active=%3 opusActive=%4")
+                           .arg(codecTx.codecType())
+                           .arg(codecTx.forcePcm() ? 1 : 0)
+                           .arg(codecTx.codec2Active() ? 1 : 0)
+                           .arg(codecTx.opusActive() ? 1 : 0));
     });
 
     QObject::connect(&appState, &AppState::forcePcmChanged,
                      &appState, [&codecTx, &appState]() {
         codecTx.setForcePcm(appState.forcePcm());
-        logCodecStatus(QStringLiteral("TX codec mode=%1 forcePcm=%2 codec2Active=%3")
+        logCodecStatus(QStringLiteral("TX codec mode=%1 forcePcm=%2 codec2Active=%3 opusActive=%4")
                            .arg(codecTx.mode())
                            .arg(codecTx.forcePcm() ? 1 : 0)
-                           .arg(codecTx.codec2Active() ? 1 : 0));
+                           .arg(codecTx.codec2Active() ? 1 : 0)
+                           .arg(codecTx.opusActive() ? 1 : 0));
     });
 
     QObject::connect(&appState, &AppState::micVolumePercentChanged,
@@ -355,54 +395,88 @@ int main(int argc, char *argv[])
                            .arg(rxFecAssistAlwaysOn ? 1 : 0));
     });
 
-    auto sendCodecConfig = [&packetizer, &transport, &currentServerAddress, &currentServerPort,
-                            &appState, &codecTx, &suppressCodecBroadcast,
-                            &lastSentCodecMode, &lastSentPcmOnly,
-                            &lastSentAddress, &lastSentPort](bool force = false) {
+    sendCodecConfig = [&packetizer, &transport, &currentServerAddress, &currentServerPort,
+                       &appState, &codecTx, &suppressCodecBroadcast,
+                       &lastSentCodecMode, &lastSentCodecId,
+                       &lastSentAddress, &lastSentPort](bool force = false) {
         if (suppressCodecBroadcast)
             return;
         if (currentServerPort == 0 || currentServerAddress.isNull())
             return;
 
-        const bool pcmOnly = appState.forcePcm() || !codecTx.codec2Active();
+        const int codecId = codecTx.activeCodecTransportId();
+        const bool pcmOnly = (codecId == Proto::CODEC_TRANSPORT_PCM);
         if (!force)
         {
             if (lastSentAddress == currentServerAddress &&
                 lastSentPort == currentServerPort &&
                 lastSentCodecMode == appState.codecBitrate() &&
-                lastSentPcmOnly == (pcmOnly ? 1 : 0))
+                lastSentCodecId == codecId)
             {
                 return;
             }
         }
-        QByteArray payload(3, 0);
+        QByteArray payload(4, 0);
         payload[0] = static_cast<char>(pcmOnly ? 1 : 0);
+        payload[1] = static_cast<char>(codecId);
         const quint16 mode = static_cast<quint16>(appState.codecBitrate());
-        qToBigEndian(mode, reinterpret_cast<uchar*>(payload.data() + 1));
+        qToBigEndian(mode, reinterpret_cast<uchar*>(payload.data() + 2));
 
         const QByteArray packet = packetizer.packPlain(Proto::PKT_CODEC_CONFIG, payload);
         transport.send(packet, currentServerAddress, currentServerPort);
-        logCodecStatus(QStringLiteral("TX codec_config sent mode=%1 forcePcm=%2 codec2Active=%3")
+        logCodecStatus(QStringLiteral("TX codec_config sent mode=%1 codecId=%2 forcePcm=%3 codec2Active=%4 opusActive=%5")
                            .arg(appState.codecBitrate())
+                           .arg(codecId)
                            .arg(pcmOnly ? 1 : 0)
-                           .arg(codecTx.codec2Active() ? 1 : 0));
+                           .arg(codecTx.codec2Active() ? 1 : 0)
+                           .arg(codecTx.opusActive() ? 1 : 0));
 
         lastSentAddress = currentServerAddress;
         lastSentPort = currentServerPort;
         lastSentCodecMode = appState.codecBitrate();
-        lastSentPcmOnly = pcmOnly ? 1 : 0;
+        lastSentCodecId = codecId;
     };
 
+    QObject::connect(&appState, &AppState::senderIdChanged,
+                     &appState, [&appState, &packetizer,
+                                 &lastSentAddress, &lastSentPort,
+                                 &lastSentCodecMode, &lastSentCodecId,
+                                 &sendCodecConfig]() {
+        const quint32 senderId = appState.senderId();
+        if (senderId == 0)
+            return;
+        packetizer.setSenderId(senderId);
+        appState.setSelfId(senderId);
+        lastSentAddress = QHostAddress();
+        lastSentPort = 0;
+        lastSentCodecMode = -1;
+        lastSentCodecId = -1;
+        sendCodecConfig(true);
+    });
+
     QObject::connect(&appState, &AppState::codecBitrateChanged,
-                     &appState, sendCodecConfig);
+                     &appState, [&sendCodecConfig]() {
+        sendCodecConfig(false);
+    });
     QObject::connect(&appState, &AppState::forcePcmChanged,
-                     &appState, sendCodecConfig);
+                     &appState, [&sendCodecConfig]() {
+        sendCodecConfig(false);
+    });
     QObject::connect(&codecTx, &Codec2Wrapper::codec2ActiveChanged,
                      &appState, [&applyCodecSettings, &sendCodecConfig, &codecTx]() {
         applyCodecSettings();
         sendCodecConfig(true);
-        logCodecStatus(QStringLiteral("TX codec2Active changed -> %1")
-                           .arg(codecTx.codec2Active() ? 1 : 0));
+        logCodecStatus(QStringLiteral("TX codec active changed codec2=%1 opus=%2")
+                           .arg(codecTx.codec2Active() ? 1 : 0)
+                           .arg(codecTx.opusActive() ? 1 : 0));
+    });
+    QObject::connect(&codecTx, &Codec2Wrapper::opusActiveChanged,
+                     &appState, [&applyCodecSettings, &sendCodecConfig, &codecTx]() {
+        applyCodecSettings();
+        sendCodecConfig(true);
+        logCodecStatus(QStringLiteral("TX codec active changed codec2=%1 opus=%2")
+                           .arg(codecTx.codec2Active() ? 1 : 0)
+                           .arg(codecTx.opusActive() ? 1 : 0));
     });
 
     QObject::connect(&channelManager, &ChannelManager::talkerChanged,
@@ -439,29 +513,43 @@ int main(int argc, char *argv[])
                                   &suppressCodecBroadcast,
                                   &lastRxConfigSender,
                                   &lastRxConfigMode,
-                                  &lastRxConfigPcmOnly]
-                                  (quint32 senderId, int mode, bool pcmOnly) {
-        const int pcmOnlyInt = pcmOnly ? 1 : 0;
+                                  &lastRxConfigCodecId]
+                                  (quint32 senderId, int mode, bool pcmOnly, int codecId) {
+        int normalizedCodecId = codecId;
+        if (pcmOnly || codecId == Proto::CODEC_TRANSPORT_PCM)
+            normalizedCodecId = Proto::CODEC_TRANSPORT_PCM;
+        else if (codecId != Proto::CODEC_TRANSPORT_CODEC2 &&
+                 codecId != Proto::CODEC_TRANSPORT_OPUS)
+            normalizedCodecId = Proto::CODEC_TRANSPORT_CODEC2;
+
         if (lastRxConfigSender == senderId &&
             lastRxConfigMode == mode &&
-            lastRxConfigPcmOnly == pcmOnlyInt)
+            lastRxConfigCodecId == normalizedCodecId)
         {
             return;
         }
-        logCodecStatus(QStringLiteral("RX codec_config recv sender=%1 mode=%2 pcmOnly=%3")
+        logCodecStatus(QStringLiteral("RX codec_config recv sender=%1 mode=%2 codecId=%3 pcmOnly=%4")
                            .arg(senderId)
                            .arg(mode)
-                           .arg(pcmOnlyInt));
+                           .arg(normalizedCodecId)
+                           .arg(pcmOnly ? 1 : 0));
         suppressCodecBroadcast = true;
-        codecRx.setForcePcm(pcmOnly);
+        if (normalizedCodecId == Proto::CODEC_TRANSPORT_OPUS)
+            codecRx.setCodecType(Codec2Wrapper::CodecTypeOpus);
+        else
+            codecRx.setCodecType(Codec2Wrapper::CodecTypeCodec2);
+        codecRx.setForcePcm(normalizedCodecId == Proto::CODEC_TRANSPORT_PCM);
         codecRx.setMode(mode);
-        logCodecStatus(QStringLiteral("RX codec_config applied mode=%1 pcmOnly=%2")
+        logCodecStatus(QStringLiteral("RX codec_config applied mode=%1 codecId=%2 forcePcm=%3 codec2Active=%4 opusActive=%5")
                            .arg(mode)
-                           .arg(pcmOnlyInt));
+                           .arg(normalizedCodecId)
+                           .arg(codecRx.forcePcm() ? 1 : 0)
+                           .arg(codecRx.codec2Active() ? 1 : 0)
+                           .arg(codecRx.opusActive() ? 1 : 0));
         suppressCodecBroadcast = false;
         lastRxConfigSender = senderId;
         lastRxConfigMode = mode;
-        lastRxConfigPcmOnly = pcmOnlyInt;
+        lastRxConfigCodecId = normalizedCodecId;
     });
 
     QObject::connect(&channelManager, &ChannelManager::handshakeReceived,
@@ -503,7 +591,7 @@ int main(int argc, char *argv[])
                      &appState,
                      [&appState, &pttController, &keyExchange, &cipher, &serverTimeout,
                        &applyCryptoPreference, &sendCodecConfig, &keepaliveTimer, &codecConfigTimer,
-                       &lastRxConfigSender, &lastRxConfigMode, &lastRxConfigPcmOnly,
+                       &lastRxConfigSender, &lastRxConfigMode, &lastRxConfigCodecId,
                        &currentServerAddress, &currentServerPort,
                        &updateAndroidBackgroundReceiveService, &txActive](quint32 channelId,
                                                                   const QString& address,
@@ -517,7 +605,7 @@ int main(int argc, char *argv[])
         appState.setPttPressed(false);
         lastRxConfigSender = 0;
         lastRxConfigMode = -1;
-        lastRxConfigPcmOnly = -1;
+        lastRxConfigCodecId = -1;
         pttController.setTalkAllowed(false);
         pttController.setRxHoldActive(false);
 
@@ -613,7 +701,10 @@ int main(int argc, char *argv[])
     // source port; the relay tracks sender endpoints dynamically.
     transport.bind(0);
 
-    quint32 senderId = QRandomGenerator::global()->bounded(1u, 0x7FFFFFFFu);
+    quint32 senderId = appState.senderId();
+    if (senderId == 0)
+        senderId = QRandomGenerator::global()->bounded(1u, 0x7FFFFFFFu);
+    appState.setSenderId(senderId);
     packetizer.setSenderId(senderId);
     packetizer.setKeyId(cipher.keyId());
     appState.setSelfId(senderId);
@@ -638,6 +729,10 @@ int main(int argc, char *argv[])
     codecTx.setCodec2LibraryPath(appState.codec2LibraryPath());
     codecRx.setCodec2LibraryPath(appState.codec2LibraryPath());
     syncCodec2LibraryState();
+    codecTx.setOpusLibraryPath(appState.opusLibraryPath());
+    codecRx.setOpusLibraryPath(appState.opusLibraryPath());
+    syncOpusLibraryState();
+    applyCodecSelection();
     codecTx.setForcePcm(appState.forcePcm());
     codecRx.setMode(appState.codecBitrate());
     codecRx.setForcePcm(appState.forcePcm());
@@ -645,14 +740,18 @@ int main(int argc, char *argv[])
     audioInput.setNoiseSuppressionEnabled(appState.noiseSuppressionEnabled());
     audioInput.setNoiseSuppressionLevel(appState.noiseSuppressionLevel());
     audioOutput.setOutputGainPercent(appState.speakerVolumePercent());
-    logCodecStatus(QStringLiteral("Initial TX codec mode=%1 forcePcm=%2 codec2Active=%3")
+    logCodecStatus(QStringLiteral("Initial TX codec mode=%1 type=%2 forcePcm=%3 codec2Active=%4 opusActive=%5")
                        .arg(codecTx.mode())
+                       .arg(codecTx.codecType())
                        .arg(codecTx.forcePcm() ? 1 : 0)
-                       .arg(codecTx.codec2Active() ? 1 : 0));
-    logCodecStatus(QStringLiteral("Initial RX codec mode=%1 forcePcm=%2 codec2Active=%3")
+                       .arg(codecTx.codec2Active() ? 1 : 0)
+                       .arg(codecTx.opusActive() ? 1 : 0));
+    logCodecStatus(QStringLiteral("Initial RX codec mode=%1 type=%2 forcePcm=%3 codec2Active=%4 opusActive=%5")
                        .arg(codecRx.mode())
+                       .arg(codecRx.codecType())
                        .arg(codecRx.forcePcm() ? 1 : 0)
-                       .arg(codecRx.codec2Active() ? 1 : 0));
+                       .arg(codecRx.codec2Active() ? 1 : 0)
+                       .arg(codecRx.opusActive() ? 1 : 0));
 
     engine.rootContext()->setContextProperty("appState", &appState);
     engine.rootContext()->setContextProperty("audioInput", &audioInput);
