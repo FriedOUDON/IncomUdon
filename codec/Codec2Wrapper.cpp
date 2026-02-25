@@ -184,7 +184,7 @@ QString copyAndroidContentUriToLocalPath(const QString& uriText, QString* error)
 
     QJniObject jUriText = QJniObject::fromString(uriText);
     QJniObject jResult = QJniObject::callStaticObjectMethod(
-        "com/example/incomudon/IncomUdonActivity",
+        "com/friedoudon/incomudon/IncomUdonActivity",
         "copyContentUriToLocalLib",
         "(Ljava/lang/String;)Ljava/lang/String;",
         jUriText.object<jstring>());

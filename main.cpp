@@ -200,7 +200,7 @@ int main(int argc, char *argv[])
         const bool hasTarget = (!currentServerAddress.isNull() && currentServerPort != 0);
         const bool enable = hasTarget && appInBackground;
         QJniObject::callStaticMethod<void>(
-            "com/example/incomudon/IncomUdonActivity",
+            "com/friedoudon/incomudon/IncomUdonActivity",
             "setKeepAliveServiceEnabled",
             "(Z)V",
             static_cast<jboolean>(enable ? 1 : 0));

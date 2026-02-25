@@ -31,7 +31,7 @@ bool AndroidPttBridge::initialize()
          reinterpret_cast<void*>(&AndroidPttBridge::nativeOnHeadsetPttChanged)}
     };
 
-    const bool ok = env.registerNativeMethods("com/example/incomudon/IncomUdonActivity",
+    const bool ok = env.registerNativeMethods("com/friedoudon/incomudon/IncomUdonActivity",
                                               methods,
                                               sizeof(methods) / sizeof(methods[0]));
     if (!ok)
@@ -59,7 +59,7 @@ void AndroidPttBridge::setPttAudioRouteEnabled(bool enabled)
         initialize();
 
     QJniObject::callStaticMethod<void>(
-        "com/example/incomudon/IncomUdonActivity",
+        "com/friedoudon/incomudon/IncomUdonActivity",
         "setPttAudioRoute",
         "(Z)V",
         static_cast<jboolean>(enabled ? JNI_TRUE : JNI_FALSE));
@@ -75,7 +75,7 @@ void AndroidPttBridge::setPreferCommunicationMode(bool enabled)
         initialize();
 
     QJniObject::callStaticMethod<void>(
-        "com/example/incomudon/IncomUdonActivity",
+        "com/friedoudon/incomudon/IncomUdonActivity",
         "setPreferCommunicationMode",
         "(Z)V",
         static_cast<jboolean>(enabled ? JNI_TRUE : JNI_FALSE));
@@ -91,7 +91,7 @@ void AndroidPttBridge::playCueTone(int cueId)
         initialize();
 
     QJniObject::callStaticMethod<void>(
-        "com/example/incomudon/IncomUdonActivity",
+        "com/friedoudon/incomudon/IncomUdonActivity",
         "playCueTone",
         "(I)V",
         static_cast<jint>(cueId));

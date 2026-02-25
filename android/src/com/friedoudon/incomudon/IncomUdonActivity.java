@@ -1,4 +1,4 @@
-package com.example.incomudon;
+package com.friedoudon.incomudon;
 
 import android.content.ContentResolver;
 import android.media.AudioDeviceInfo;
