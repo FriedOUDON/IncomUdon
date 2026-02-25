@@ -551,23 +551,22 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
     m_talkEnded = false;
     m_releaseTalkerId = 0;
 
-    // Parse audio payload in one unified path for both FEC ON/OFF.
-    // New format: [audioSeq:2][codecFrame...]
-    // Legacy format: [codecFrame...] (no audioSeq in payload)
-    const int expectedFrame = m_codec ? m_codec->frameBytes() : 0;
+    // Audio payload format (current): [audioSeq:2][codecFrame...]
+    // Keep a minimal fallback for very old/short payloads only.
     quint16 audioSeq = parsed.header.seq;
-    QByteArray frame = plaintext;
-    if (expectedFrame > 0 && plaintext.size() == expectedFrame)
-    {
-        audioSeq = parsed.header.seq;
-        frame = plaintext;
-    }
-    else if (plaintext.size() >= 2)
+    QByteArray frame;
+    if (plaintext.size() >= 2)
     {
         audioSeq = qFromBigEndian<quint16>(
             reinterpret_cast<const uchar*>(plaintext.constData()));
         frame = plaintext.mid(2);
     }
+    else
+    {
+        frame = plaintext;
+    }
+    if (frame.isEmpty())
+        return;
     m_jitter->pushFrame(audioSeq, frame);
 
     if (m_fecEnabled)
@@ -799,12 +798,33 @@ void ChannelManager::onPlayoutTick()
             return;
         }
 
-        if (!m_silenceMode)
-            m_silenceMode = true;
-
+        const bool opusMode = (m_codec && m_codec->opusActive());
         const int plcFrames = m_plcMaxFrames;
-        if (!m_lastPcmFrame.isEmpty())
+        if (opusMode)
         {
+            if (m_plcRemaining == 0)
+                m_plcRemaining = plcFrames;
+
+            if (m_plcRemaining > 0)
+            {
+                QByteArray plc = m_codec->decode(QByteArray());
+                if (plc.isEmpty())
+                    plc = m_silenceFrame;
+
+                m_audioOutput->playFrame(plc);
+                emit audioFrameReceived(plc);
+                m_lastPcmFrame = plc;
+                m_silenceMode = false;
+                m_plcRemaining--;
+                if (m_plcRemaining == 0)
+                    m_plcRemaining = -1;
+                return;
+            }
+        }
+        else if (!m_lastPcmFrame.isEmpty())
+        {
+            if (!m_silenceMode)
+                m_silenceMode = true;
             if (m_plcRemaining == 0)
                 m_plcRemaining = plcFrames;
 
@@ -822,6 +842,7 @@ void ChannelManager::onPlayoutTick()
             }
         }
         m_plcRemaining = 0;
+        m_silenceMode = true;
 
         m_audioOutput->playFrame(m_silenceFrame);
         emit audioFrameReceived(m_silenceFrame);

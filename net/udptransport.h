@@ -14,6 +14,8 @@ public:
     explicit UdpTransport(QObject* parent = nullptr);
 
     bool bind(quint16 port);
+    bool qosEnabled() const;
+    void setQosEnabled(bool enabled);
     void send(const QByteArray& data,
               const QHostAddress& addr,
               quint16 port);
@@ -30,5 +32,8 @@ private slots:
     void onReadyRead();
 
 private:
+    void applyQosOption();
+
     QUdpSocket m_socket;
+    bool m_qosEnabled = true;
 };

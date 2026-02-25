@@ -394,6 +394,13 @@ int main(int argc, char *argv[])
                            .arg(appState.fecEnabled() ? 1 : 0)
                            .arg(rxFecAssistAlwaysOn ? 1 : 0));
     });
+    QObject::connect(&appState, &AppState::qosEnabledChanged,
+                     &appState, [&appState, &transport]() {
+        transport.setQosEnabled(appState.qosEnabled());
+        logCodecStatus(QStringLiteral("Network QoS %1 (DSCP EF)")
+                           .arg(appState.qosEnabled() ? QStringLiteral("enabled")
+                                                      : QStringLiteral("disabled")));
+    });
 
     sendCodecConfig = [&packetizer, &transport, &currentServerAddress, &currentServerPort,
                        &appState, &codecTx, &suppressCodecBroadcast,
@@ -699,6 +706,7 @@ int main(int argc, char *argv[])
 
     // Bind to an ephemeral local UDP port so each client can use a different
     // source port; the relay tracks sender endpoints dynamically.
+    transport.setQosEnabled(appState.qosEnabled());
     transport.bind(0);
 
     quint32 senderId = appState.senderId();

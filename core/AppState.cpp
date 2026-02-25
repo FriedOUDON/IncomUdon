@@ -340,6 +340,20 @@ void AppState::setFecEnabled(bool enabled)
     emit fecEnabledChanged();
 }
 
+bool AppState::qosEnabled() const
+{
+    return m_qosEnabled;
+}
+
+void AppState::setQosEnabled(bool enabled)
+{
+    if (m_qosEnabled == enabled)
+        return;
+
+    m_qosEnabled = enabled;
+    emit qosEnabledChanged();
+}
+
 int AppState::micVolumePercent() const
 {
     return m_micVolumePercent;

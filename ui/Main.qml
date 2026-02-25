@@ -277,6 +277,7 @@ Window {
             property int codecBitrate: 1600
             property bool forcePcm: true
             property bool txFecEnabled: true
+            property bool qosEnabled: true
             property int cryptoMode: 0
             property int pageIndex: 0
             property int micVolumePercent: 100
@@ -318,6 +319,7 @@ Window {
                         persisted.codecBitrate,
                         initialCodecSelection)
             appState.fecEnabled = persisted.txFecEnabled
+            appState.qosEnabled = persisted.qosEnabled
             appState.cryptoMode = appState.opensslAvailable ? persisted.cryptoMode : 1
             appState.micVolumePercent = root.clampInt(persisted.micVolumePercent, 0, 200, 100)
             appState.noiseSuppressionEnabled = persisted.noiseSuppressionEnabled
@@ -369,6 +371,7 @@ Window {
                     persisted.forcePcm = appState.forcePcm
             }
             function onFecEnabledChanged() { persisted.txFecEnabled = appState.fecEnabled }
+            function onQosEnabledChanged() { persisted.qosEnabled = appState.qosEnabled }
             function onCryptoModeChanged() { persisted.cryptoMode = appState.cryptoMode }
             function onMicVolumePercentChanged() { persisted.micVolumePercent = appState.micVolumePercent }
             function onNoiseSuppressionEnabledChanged() { persisted.noiseSuppressionEnabled = appState.noiseSuppressionEnabled }
@@ -1464,6 +1467,60 @@ Window {
 
                                 TapHandler { onTapped: appState.fecEnabled = true }
                             }
+                        }
+
+                        Text {
+                            text: "Network QoS (DSCP EF)"
+                            color: "#90a4ae"
+                            font.pixelSize: 13
+                        }
+
+                        Row {
+                            spacing: 8
+
+                            Rectangle {
+                                width: 100
+                                height: 28
+                                radius: 6
+                                color: !appState.qosEnabled ? "#4db6ac" : "#1a222b"
+                                border.color: "#263238"
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "Off"
+                                    color: !appState.qosEnabled ? "#0b0f13" : "#cfd8dc"
+                                    font.pixelSize: 14
+                                }
+
+                                TapHandler { onTapped: appState.qosEnabled = false }
+                            }
+
+                            Rectangle {
+                                width: 100
+                                height: 28
+                                radius: 6
+                                color: appState.qosEnabled ? "#4db6ac" : "#1a222b"
+                                border.color: "#263238"
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "On"
+                                    color: appState.qosEnabled ? "#0b0f13" : "#cfd8dc"
+                                    font.pixelSize: 14
+                                }
+
+                                TapHandler { onTapped: appState.qosEnabled = true }
+                            }
+                        }
+
+                        Text {
+                            text: appState.qosEnabled ?
+                                      "Voice packets request priority with DSCP EF (network may ignore it)." :
+                                      "QoS marking is disabled."
+                            color: "#607d8b"
+                            font.pixelSize: 12
                         }
 
                         Text {

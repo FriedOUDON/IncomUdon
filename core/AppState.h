@@ -69,6 +69,10 @@ class AppState : public QObject
                READ fecEnabled
                WRITE setFecEnabled
                NOTIFY fecEnabledChanged)
+    Q_PROPERTY(bool qosEnabled
+               READ qosEnabled
+               WRITE setQosEnabled
+               NOTIFY qosEnabledChanged)
     Q_PROPERTY(int micVolumePercent
                READ micVolumePercent
                WRITE setMicVolumePercent
@@ -169,6 +173,8 @@ public:
     void setForcePcm(bool force);
     bool fecEnabled() const;
     void setFecEnabled(bool enabled);
+    bool qosEnabled() const;
+    void setQosEnabled(bool enabled);
     int micVolumePercent() const;
     void setMicVolumePercent(int percent);
     bool noiseSuppressionEnabled() const;
@@ -207,6 +213,7 @@ signals:
     void codecBitrateChanged();
     void forcePcmChanged();
     void fecEnabledChanged();
+    void qosEnabledChanged();
     void micVolumePercentChanged();
     void noiseSuppressionEnabledChanged();
     void noiseSuppressionLevelChanged();
@@ -239,6 +246,7 @@ private:
     int m_codecBitrate = 1600;
     bool m_forcePcm = true;
     bool m_fecEnabled = true;
+    bool m_qosEnabled = true;
     int m_micVolumePercent = 100;
     bool m_noiseSuppressionEnabled = false;
     int m_noiseSuppressionLevel = 45;
