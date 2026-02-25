@@ -49,6 +49,7 @@ Window {
         property int pttOnPlayStartedId: 0
         property int pttOnRetryAttempts: 0
         property int pttOnCueRecoveryRequestId: 0
+        property bool startupAutoConnectDone: false
         property double lastCueRecoveryMs: 0
         property bool suppressForcePcmPersistence: false
         property var cueAudioDevice: cueMediaDevices.defaultAudioOutput
@@ -101,96 +102,12 @@ Window {
             return s
         }
 
-        function loadResourceTextAsync(urlCandidates, callback) {
-            var candidates = urlCandidates || []
-            if (candidates.length === 0) {
-                callback("No resource candidates")
+        function refreshLicensesText() {
+            if (!licenseProvider) {
+                licensesText = "License provider is not available."
                 return
             }
-
-            var idx = 0
-            function tryNext(lastError) {
-                if (idx >= candidates.length) {
-                    callback("Failed to read resource\n" + lastError)
-                    return
-                }
-
-                var urlValue = candidates[idx++]
-                var xhr = new XMLHttpRequest()
-                xhr.onreadystatechange = function() {
-                    if (xhr.readyState !== XMLHttpRequest.DONE)
-                        return
-                    if (xhr.status === 200 || xhr.status === 0) {
-                        callback(xhr.responseText)
-                        return
-                    }
-                    tryNext("url=" + urlValue + " status=" + xhr.status)
-                }
-                xhr.onerror = function() {
-                    tryNext("url=" + urlValue + " network error")
-                }
-                try {
-                    xhr.open("GET", urlValue)
-                    xhr.send()
-                } catch (e) {
-                    tryNext("url=" + urlValue + " " + e)
-                }
-            }
-            tryNext("")
-        }
-
-        function refreshLicensesText() {
-            licensesText = "Loading licenses..."
-
-            var appLicense = ""
-            var notices = ""
-            var apache = ""
-            var lgpl = ""
-            var pending = 4
-
-            function completeOne() {
-                pending = pending - 1
-                if (pending > 0)
-                    return
-                licensesText =
-                        "=== App License (LICENSE) ===\n" + appLicense +
-                        "\n\n=== Third Party Notices ===\n" + notices +
-                        "\n\n=== Apache-2.0 ===\n" + apache +
-                        "\n\n=== LGPL-2.1 ===\n" + lgpl
-            }
-
-            loadResourceTextAsync([
-                                      Qt.resolvedUrl("../LICENSE"),
-                                      "qrc:/qt/qml/IncomUdon/LICENSE",
-                                      "qrc:/LICENSE"
-                                  ], function(text) {
-                                      appLicense = text
-                                      completeOne()
-                                  })
-            loadResourceTextAsync([
-                                      Qt.resolvedUrl("../THIRD_PARTY_NOTICES.md"),
-                                      "qrc:/qt/qml/IncomUdon/THIRD_PARTY_NOTICES.md",
-                                      "qrc:/THIRD_PARTY_NOTICES.md"
-                                  ], function(text) {
-                                      notices = text
-                                      completeOne()
-                                  })
-            loadResourceTextAsync([
-                                      Qt.resolvedUrl("../LICENSES/Apache-2.0.txt"),
-                                      "qrc:/qt/qml/IncomUdon/LICENSES/Apache-2.0.txt",
-                                      "qrc:/LICENSES/Apache-2.0.txt"
-                                  ], function(text) {
-                                      apache = text
-                                      completeOne()
-                                  })
-            loadResourceTextAsync([
-                                      Qt.resolvedUrl("../LICENSES/LGPL-2.1.txt"),
-                                      "qrc:/qt/qml/IncomUdon/LICENSES/LGPL-2.1.txt",
-                                      "qrc:/LICENSES/LGPL-2.1.txt"
-                                  ], function(text) {
-                                      lgpl = text
-                                      completeOne()
-                                  })
+            licensesText = licenseProvider.combinedLicenses()
         }
 
         function nearestValue(model, value) {
@@ -229,15 +146,31 @@ Window {
         }
 
         function legacyModeToOpusBps(mode) {
-            if (mode <= 450)
+            if (mode < 6000)
                 return 6000
-            if (mode <= 700)
-                return 8000
-            if (mode <= 1600)
-                return 12000
-            if (mode <= 2400)
-                return 16000
-            return 20000
+            return mode
+        }
+
+        function tryAutoConnectOnStartup() {
+            if (startupAutoConnectDone)
+                return
+            startupAutoConnectDone = true
+
+            var addr = (root.serverAddress || "").toString().trim()
+            var passwordText = (root.password || "").toString()
+            var port = parseInt(root.serverPort)
+            var channel = parseInt(root.channelId)
+
+            if (addr.length === 0)
+                return
+            if (!isFinite(port) || port <= 0 || port > 65535)
+                return
+            if (!isFinite(channel) || channel <= 0)
+                return
+            if (passwordText.length === 0)
+                return
+
+            channelManager.connectToServer(channel, addr, port, passwordText)
         }
 
         function normalizeBitrateForSelection(value, selection) {
@@ -439,6 +372,7 @@ Window {
 
             tabs.currentIndex = Math.max(0, Math.min(1, persisted.pageIndex))
             root.refreshLicensesText()
+            Qt.callLater(root.tryAutoConnectOnStartup)
             cueWarmupTimer.start()
         }
 
@@ -906,8 +840,8 @@ Window {
                     font.pixelSize: 20
                     palette.buttonText: "#2b2b2b"
                     background: Rectangle {
-                        color: tabs.palette.button
-                        border.color: tabs.palette.mid
+                        color: "#ffffff"
+                        border.color: "#cfcfcf"
                         border.width: 1
                         radius: 0
                     }

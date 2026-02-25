@@ -21,6 +21,7 @@
 #include "core/AndroidPttBridge.h"
 #include "core/AppState.h"
 #include "core/ChannelManager.h"
+#include "core/LicenseProvider.h"
 #include "core/PttController.h"
 #include "crypto/AeadCipher.h"
 #include "crypto/KeyExchange.h"
@@ -46,6 +47,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
 
     AppState appState;
+    LicenseProvider licenseProvider;
     AudioInput audioInput;
     AudioOutput audioOutput;
     Codec2Wrapper codecTx;
@@ -766,6 +768,7 @@ int main(int argc, char *argv[])
                        .arg(codecRx.opusActive() ? 1 : 0));
 
     engine.rootContext()->setContextProperty("appState", &appState);
+    engine.rootContext()->setContextProperty("licenseProvider", &licenseProvider);
     engine.rootContext()->setContextProperty("audioInput", &audioInput);
     engine.rootContext()->setContextProperty("pttController", &pttController);
     engine.rootContext()->setContextProperty("channelManager", &channelManager);

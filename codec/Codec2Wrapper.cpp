@@ -929,37 +929,22 @@ int Codec2Wrapper::normalizeMode(int mode) const
 
 int Codec2Wrapper::opusBitrateForMode(int mode) const
 {
-    if (mode >= 6000)
-    {
-        static constexpr int options[] = {6000, 8000, 12000, 16000, 20000, 64000, 96000, 128000};
-        int best = options[0];
-        int bestDiff = qAbs(mode - options[0]);
-        for (int i = 1; i < 8; ++i)
-        {
-            const int diff = qAbs(mode - options[i]);
-            if (diff < bestDiff)
-            {
-                bestDiff = diff;
-                best = options[i];
-            }
-        }
-        return best;
-    }
-
-    switch (normalizeMode(mode))
-    {
-    case 450:
+    if (mode < 6000)
         return 6000;
-    case 700:
-        return 8000;
-    case 2400:
-        return 16000;
-    case 3200:
-        return 20000;
-    case 1600:
-    default:
-        return 12000;
+
+    static constexpr int options[] = {6000, 8000, 12000, 16000, 20000, 64000, 96000, 128000};
+    int best = options[0];
+    int bestDiff = qAbs(mode - options[0]);
+    for (int i = 1; i < 8; ++i)
+    {
+        const int diff = qAbs(mode - options[i]);
+        if (diff < bestDiff)
+        {
+            bestDiff = diff;
+            best = options[i];
+        }
     }
+    return best;
 }
 
 #ifdef INCOMUDON_USE_CODEC2

@@ -40,6 +40,8 @@ qt_add_qml_module(appIncomUdon
         core/AppState.cpp
         core/AndroidPttBridge.h
         core/AndroidPttBridge.cpp
+        core/LicenseProvider.h
+        core/LicenseProvider.cpp
         core/ChannelManager.h
         core/ChannelManager.cpp
         core/PttController.h
