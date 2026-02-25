@@ -1,4 +1,5 @@
 #include "udptransport.h"
+#include <QVariant>
 
 UdpTransport::UdpTransport(QObject* parent)
     : QObject(parent)
@@ -66,5 +67,5 @@ void UdpTransport::applyQosOption()
 {
     // DSCP EF (46) for voice; lower 2 bits are ECN.
     const int tos = m_qosEnabled ? (46 << 2) : 0;
-    m_socket.setSocketOption(QAbstractSocket::TypeOfServiceOption, tos);
+    m_socket.setSocketOption(QAbstractSocket::TypeOfServiceOption, QVariant(tos));
 }
