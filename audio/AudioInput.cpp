@@ -1,7 +1,10 @@
 #include "AudioInput.h"
 
 #include <algorithm>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QPermission>
+#include <QPermissions>
 #include <QtEndian>
 #include <cstring>
 #include <cmath>
@@ -212,6 +215,33 @@ void AudioInput::start()
     m_wantRunning = true;
     m_restartTimer.stop();
     m_restartScheduled = false;
+
+#if defined(Q_OS_ANDROID) && QT_CONFIG(permissions)
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app)
+    {
+        const QMicrophonePermission permission;
+        const Qt::PermissionStatus status = app->checkPermission(permission);
+        if (status != Qt::PermissionStatus::Granted)
+        {
+            if (m_permissionRequestInFlight)
+                return;
+
+            m_permissionRequestInFlight = true;
+            app->requestPermission(permission, this, [this](const QPermission& result) {
+                m_permissionRequestInFlight = false;
+                if (result.status() == Qt::PermissionStatus::Granted)
+                {
+                    if (m_wantRunning)
+                        start();
+                    return;
+                }
+                emit microphonePermissionDenied();
+            });
+            return;
+        }
+    }
+#endif
 
     if (m_running && m_source && m_device)
         return;

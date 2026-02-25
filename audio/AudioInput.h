@@ -77,6 +77,7 @@ signals:
     void frameBytesChanged();
     void intervalMsChanged();
     void runningChanged();
+    void microphonePermissionDenied();
     void inputDevicesChanged();
     void selectedInputDeviceIdChanged();
     void noiseSuppressionEnabledChanged();
@@ -118,5 +119,8 @@ private:
     bool m_running = false;
     bool m_wantRunning = false;
     bool m_restartScheduled = false;
+#if defined(Q_OS_ANDROID) && QT_CONFIG(permissions)
+    bool m_permissionRequestInFlight = false;
+#endif
     QTimer m_restartTimer;
 };
