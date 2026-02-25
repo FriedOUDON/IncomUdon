@@ -52,6 +52,8 @@ Window {
         property double lastCueRecoveryMs: 0
         property bool suppressForcePcmPersistence: false
         property var cueAudioDevice: cueMediaDevices.defaultAudioOutput
+        property string codec2DownloadUrl: "https://github.com/FriedOUDON/libcodec2/releases/tag/v1.0.2"
+        property string licensesText: ""
         readonly property real _pxPerDp: Math.max(1.0, Screen.pixelDensity * 25.4 / 160.0)
         readonly property int _androidTopInsetFallback: Qt.platform.os === "android" ? Math.round(28 * _pxPerDp) : 0
         readonly property int _androidBottomInsetFallback: Qt.platform.os === "android" ? Math.round(56 * _pxPerDp) : 0
@@ -97,6 +99,98 @@ Window {
             if (idx >= 0 && idx + 1 < s.length)
                 return decodeURIComponent(s.slice(idx + 1))
             return s
+        }
+
+        function loadResourceTextAsync(urlCandidates, callback) {
+            var candidates = urlCandidates || []
+            if (candidates.length === 0) {
+                callback("No resource candidates")
+                return
+            }
+
+            var idx = 0
+            function tryNext(lastError) {
+                if (idx >= candidates.length) {
+                    callback("Failed to read resource\n" + lastError)
+                    return
+                }
+
+                var urlValue = candidates[idx++]
+                var xhr = new XMLHttpRequest()
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE)
+                        return
+                    if (xhr.status === 200 || xhr.status === 0) {
+                        callback(xhr.responseText)
+                        return
+                    }
+                    tryNext("url=" + urlValue + " status=" + xhr.status)
+                }
+                xhr.onerror = function() {
+                    tryNext("url=" + urlValue + " network error")
+                }
+                try {
+                    xhr.open("GET", urlValue)
+                    xhr.send()
+                } catch (e) {
+                    tryNext("url=" + urlValue + " " + e)
+                }
+            }
+            tryNext("")
+        }
+
+        function refreshLicensesText() {
+            licensesText = "Loading licenses..."
+
+            var appLicense = ""
+            var notices = ""
+            var apache = ""
+            var lgpl = ""
+            var pending = 4
+
+            function completeOne() {
+                pending = pending - 1
+                if (pending > 0)
+                    return
+                licensesText =
+                        "=== App License (LICENSE) ===\n" + appLicense +
+                        "\n\n=== Third Party Notices ===\n" + notices +
+                        "\n\n=== Apache-2.0 ===\n" + apache +
+                        "\n\n=== LGPL-2.1 ===\n" + lgpl
+            }
+
+            loadResourceTextAsync([
+                                      Qt.resolvedUrl("../LICENSE"),
+                                      "qrc:/qt/qml/IncomUdon/LICENSE",
+                                      "qrc:/LICENSE"
+                                  ], function(text) {
+                                      appLicense = text
+                                      completeOne()
+                                  })
+            loadResourceTextAsync([
+                                      Qt.resolvedUrl("../THIRD_PARTY_NOTICES.md"),
+                                      "qrc:/qt/qml/IncomUdon/THIRD_PARTY_NOTICES.md",
+                                      "qrc:/THIRD_PARTY_NOTICES.md"
+                                  ], function(text) {
+                                      notices = text
+                                      completeOne()
+                                  })
+            loadResourceTextAsync([
+                                      Qt.resolvedUrl("../LICENSES/Apache-2.0.txt"),
+                                      "qrc:/qt/qml/IncomUdon/LICENSES/Apache-2.0.txt",
+                                      "qrc:/LICENSES/Apache-2.0.txt"
+                                  ], function(text) {
+                                      apache = text
+                                      completeOne()
+                                  })
+            loadResourceTextAsync([
+                                      Qt.resolvedUrl("../LICENSES/LGPL-2.1.txt"),
+                                      "qrc:/qt/qml/IncomUdon/LICENSES/LGPL-2.1.txt",
+                                      "qrc:/LICENSES/LGPL-2.1.txt"
+                                  ], function(text) {
+                                      lgpl = text
+                                      completeOne()
+                                  })
         }
 
         function nearestValue(model, value) {
@@ -344,6 +438,7 @@ Window {
             root.syncCueAudioDevice()
 
             tabs.currentIndex = Math.max(0, Math.min(1, persisted.pageIndex))
+            root.refreshLicensesText()
             cueWarmupTimer.start()
         }
 
@@ -739,6 +834,48 @@ Window {
             }
         }
 
+        Menu {
+            id: overflowMenu
+            x: tabRow.x + menuButton.x + menuButton.width - width
+            y: tabRow.y + menuButton.height
+
+            MenuItem {
+                text: "Licenses"
+                onTriggered: {
+                    root.refreshLicensesText()
+                    licensesDialog.open()
+                }
+            }
+
+            MenuItem {
+                text: "Download libcodec2.so"
+                onTriggered: Qt.openUrlExternally(root.codec2DownloadUrl)
+            }
+        }
+
+        Dialog {
+            id: licensesDialog
+            modal: true
+            title: "Licenses"
+            x: Math.round((root.width - width) / 2)
+            y: Math.round((root.height - height) / 2)
+            width: Math.min(root.width - 20, 640)
+            height: Math.min(root.height - 20, 760)
+            standardButtons: Dialog.Close
+
+            contentItem: ScrollView {
+                clip: true
+                TextArea {
+                    readOnly: true
+                    wrapMode: TextEdit.WrapAnywhere
+                    text: root.licensesText
+                    color: "#cfd8dc"
+                    font.pixelSize: 12
+                    background: Rectangle { color: "#0f141a" }
+                }
+            }
+        }
+
         Column {
             anchors.fill: parent
             anchors.leftMargin: 12 + root.safeInsetLeft
@@ -747,19 +884,41 @@ Window {
             anchors.bottomMargin: 12 + root.safeInsetBottom
             spacing: 10
 
-            TabBar {
-                id: tabs
+            Row {
+                id: tabRow
                 width: parent.width
-                onCurrentIndexChanged: persisted.pageIndex = currentIndex
+                spacing: 8
 
-                TabButton { text: "Page A" }
-                TabButton { text: "Page B" }
+                TabBar {
+                    id: tabs
+                    width: parent.width - menuButton.width - tabRow.spacing
+                    onCurrentIndexChanged: persisted.pageIndex = currentIndex
+
+                    TabButton { text: "Page A" }
+                    TabButton { text: "Page B" }
+                }
+
+                ToolButton {
+                    id: menuButton
+                    width: 40
+                    height: tabs.height
+                    text: "\u22EE"
+                    font.pixelSize: 20
+                    palette.buttonText: "#2b2b2b"
+                    background: Rectangle {
+                        color: tabs.palette.button
+                        border.color: tabs.palette.mid
+                        border.width: 1
+                        radius: 0
+                    }
+                    onClicked: overflowMenu.open()
+                }
             }
 
             Loader {
                 id: pageLoader
                 width: parent.width
-                height: parent.height - tabs.height - 10
+                height: parent.height - tabRow.height - 10
                 sourceComponent: tabs.currentIndex === 0 ? pageA : pageB
             }
         }

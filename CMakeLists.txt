@@ -21,6 +21,10 @@ qt_add_qml_module(appIncomUdon
         assets/sfx/ptt_off.wav
         assets/sfx/carrier_sense.wav
         assets/sfx/README.md
+        LICENSE
+        THIRD_PARTY_NOTICES.md
+        LICENSES/Apache-2.0.txt
+        LICENSES/LGPL-2.1.txt
     SOURCES
         audio/AudioInput.h
         audio/AudioInput.cpp

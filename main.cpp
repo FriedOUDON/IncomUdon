@@ -124,6 +124,10 @@ int main(int argc, char *argv[])
                      &pttController, [&appState, &pttController]() {
         pttController.setPttPressed(appState.pttPressed());
     });
+    QObject::connect(&audioInput, &AudioInput::microphonePermissionDenied,
+                     &appState, [&appState]() {
+        appState.setLinkStatus(QStringLiteral("Microphone permission denied"));
+    });
 
     AndroidPttBridge& androidPttBridge = AndroidPttBridge::instance();
 
