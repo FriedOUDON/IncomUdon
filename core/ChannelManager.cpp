@@ -511,6 +511,17 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
         return;
     }
 
+    if (type == Proto::PKT_SERVER_CONFIG)
+    {
+        if (parsed.encryptedPayload.size() >= 2)
+        {
+            const quint16 timeoutSec = qFromBigEndian<quint16>(
+                reinterpret_cast<const uchar*>(parsed.encryptedPayload.constData()));
+            emit serverTalkTimeoutConfigured(static_cast<int>(timeoutSec));
+        }
+        return;
+    }
+
     if (type != Proto::PKT_AUDIO && type != Proto::PKT_FEC)
         return;
 

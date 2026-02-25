@@ -564,6 +564,11 @@ int main(int argc, char *argv[])
         lastRxConfigMode = mode;
         lastRxConfigCodecId = normalizedCodecId;
     });
+    QObject::connect(&channelManager, &ChannelManager::serverTalkTimeoutConfigured,
+                     &appState, [&appState](int timeoutSec) {
+        appState.setTalkTimeoutSec(timeoutSec);
+        logCodecStatus(QStringLiteral("Server talk timeout=%1s").arg(timeoutSec));
+    });
 
     QObject::connect(&channelManager, &ChannelManager::handshakeReceived,
                      &keyExchange, &KeyExchange::processHandshakePacket);
@@ -615,6 +620,7 @@ int main(int argc, char *argv[])
         txActive = false;
         appState.setServerOnline(false);
         appState.setTalkerId(0);
+        appState.setTalkTimeoutSec(0);
         appState.setPttPressed(false);
         lastRxConfigSender = 0;
         lastRxConfigMode = -1;

@@ -144,6 +144,21 @@ void AppState::setServerOnline(bool online)
     emit serverOnlineChanged();
 }
 
+int AppState::talkTimeoutSec() const
+{
+    return m_talkTimeoutSec;
+}
+
+void AppState::setTalkTimeoutSec(int sec)
+{
+    const int normalized = qBound(0, sec, 86400);
+    if (m_talkTimeoutSec == normalized)
+        return;
+
+    m_talkTimeoutSec = normalized;
+    emit talkTimeoutSecChanged();
+}
+
 quint32 AppState::selfId() const
 {
     return m_selfId;

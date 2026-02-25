@@ -50,6 +50,7 @@ Window {
         property int pttOnRetryAttempts: 0
         property int pttOnCueRecoveryRequestId: 0
         property bool startupAutoConnectDone: false
+        property int txTimeoutRemainingSec: 0
         property double lastCueRecoveryMs: 0
         property bool suppressForcePcmPersistence: false
         property var cueAudioDevice: cueMediaDevices.defaultAudioOutput
@@ -171,6 +172,21 @@ Window {
                 return
 
             channelManager.connectToServer(channel, addr, port, passwordText)
+        }
+
+        function startTxTimeoutCountdown() {
+            if (appState.talkTimeoutSec <= 0) {
+                txTimeoutRemainingSec = 0
+                txTimeoutTimer.stop()
+                return
+            }
+            txTimeoutRemainingSec = appState.talkTimeoutSec
+            txTimeoutTimer.start()
+        }
+
+        function stopTxTimeoutCountdown() {
+            txTimeoutTimer.stop()
+            txTimeoutRemainingSec = 0
         }
 
         function normalizeBitrateForSelection(value, selection) {
@@ -650,6 +666,16 @@ Window {
             function onLinkStatusChanged() {
                 if (appState.linkStatus.indexOf("Busy:") === 0)
                     root.playCarrierSenseCue()
+                if (appState.linkStatus === "TX")
+                    root.startTxTimeoutCountdown()
+                else
+                    root.stopTxTimeoutCountdown()
+            }
+            function onTalkTimeoutSecChanged() {
+                if (appState.linkStatus === "TX")
+                    root.startTxTimeoutCountdown()
+                else
+                    root.stopTxTimeoutCountdown()
             }
         }
 
@@ -666,6 +692,24 @@ Window {
                     root.pttOffSoundUrl = root.defaultPttOffSoundUrl
                 if (carrierSenseCue.status !== SoundEffect.Ready)
                     root.carrierSenseSoundUrl = root.defaultCarrierSenseSoundUrl
+            }
+        }
+
+        Timer {
+            id: txTimeoutTimer
+            interval: 1000
+            repeat: true
+            onTriggered: {
+                if (appState.linkStatus !== "TX" || appState.talkTimeoutSec <= 0) {
+                    root.stopTxTimeoutCountdown()
+                    return
+                }
+                if (root.txTimeoutRemainingSec > 0)
+                    root.txTimeoutRemainingSec = root.txTimeoutRemainingSec - 1
+                if (root.txTimeoutRemainingSec <= 0) {
+                    appState.pttPressed = false
+                    root.stopTxTimeoutCountdown()
+                }
             }
         }
 
@@ -913,7 +957,11 @@ Window {
                     anchors.right: parent.right
                     anchors.bottom: pttButton.top
                     anchors.bottomMargin: 6
-                    text: "Hold to talk"
+                    text: appState.linkStatus === "TX" &&
+                          appState.talkTimeoutSec > 0 &&
+                          root.txTimeoutRemainingSec > 0 ?
+                              ("Remaining: " + root.txTimeoutRemainingSec + "s") :
+                              "Hold to talk"
                     color: "#607d8b"
                     font.pixelSize: 15
                     horizontalAlignment: Text.AlignHCenter

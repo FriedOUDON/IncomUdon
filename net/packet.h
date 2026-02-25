@@ -23,7 +23,8 @@ enum PacketType : quint8 {
     PKT_TALK_DENY    = 0x09,
     PKT_KEY_EXCHANGE = 0x0A,
     PKT_CODEC_CONFIG = 0x0B,
-    PKT_FEC          = 0x0C
+    PKT_FEC          = 0x0C,
+    PKT_SERVER_CONFIG = 0x0D
 };
 
 enum CodecTransportId : quint8 {

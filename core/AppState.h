@@ -45,6 +45,10 @@ class AppState : public QObject
                READ serverOnline
                WRITE setServerOnline
                NOTIFY serverOnlineChanged)
+    Q_PROPERTY(int talkTimeoutSec
+               READ talkTimeoutSec
+               WRITE setTalkTimeoutSec
+               NOTIFY talkTimeoutSecChanged)
     Q_PROPERTY(quint32 selfId
                READ selfId
                WRITE setSelfId
@@ -159,6 +163,8 @@ public:
 
     bool serverOnline() const;
     void setServerOnline(bool online);
+    int talkTimeoutSec() const;
+    void setTalkTimeoutSec(int sec);
 
     quint32 selfId() const;
     void setSelfId(quint32 selfId);
@@ -207,6 +213,7 @@ signals:
     void txLevelChanged();
     void talkerIdChanged();
     void serverOnlineChanged();
+    void talkTimeoutSecChanged();
     void selfIdChanged();
     void senderIdChanged();
     void codecSelectionChanged();
@@ -240,6 +247,7 @@ private:
     float m_txLevel = 0.0f;
     quint32 m_talkerId = 0;
     bool m_serverOnline = false;
+    int m_talkTimeoutSec = 0;
     quint32 m_selfId = 0;
     quint32 m_senderId = 0;
     int m_codecSelection = CodecPcm;
