@@ -199,12 +199,12 @@
       <translation>PTT ON</translation>
     </message>
     <message>
-      <source>Page A</source>
-      <translation>ページA</translation>
+      <source>Talk</source>
+      <translation>通話</translation>
     </message>
     <message>
-      <source>Page B</source>
-      <translation>ページB</translation>
+      <source>Settings</source>
+      <translation>設定</translation>
     </message>
     <message>
       <source>Password</source>

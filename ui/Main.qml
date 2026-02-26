@@ -379,7 +379,7 @@ Window {
             property bool txFecEnabled: true
             property bool qosEnabled: true
             property int cryptoMode: 0
-            property int pageIndex: 0
+            property int pageIndex: 1
             property int micVolumePercent: 200
             property bool noiseSuppressionEnabled: false
             property int noiseSuppressionLevel: 45
@@ -966,8 +966,8 @@ Window {
                     width: parent.width - menuButton.width - tabRow.spacing
                     onCurrentIndexChanged: persisted.pageIndex = currentIndex
 
-                    TabButton { text: qsTr("Page A") }
-                    TabButton { text: qsTr("Page B") }
+                    TabButton { text: qsTr("Talk") }
+                    TabButton { text: qsTr("Settings") }
                 }
 
                 ToolButton {
