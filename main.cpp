@@ -7,6 +7,8 @@
 #include <QQmlContext>
 #include <QRandomGenerator>
 #include <QTimer>
+#include <QTranslator>
+#include <QLocale>
 #include <QtEndian>
 #include <QDebug>
 #include <QStringList>
@@ -45,6 +47,15 @@ static void logCodecStatus(const QString& message)
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+
+    QTranslator appTranslator;
+    if (appTranslator.load(QLocale::system(),
+                           QStringLiteral("incomudon"),
+                           QStringLiteral("_"),
+                           QStringLiteral(":/i18n")))
+    {
+        app.installTranslator(&appTranslator);
+    }
 
     QQmlApplicationEngine engine;
 

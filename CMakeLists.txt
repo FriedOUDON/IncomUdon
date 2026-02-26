@@ -4,7 +4,7 @@ project(IncomUdon VERSION 0.1 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Network Multimedia QuickControls2)
+find_package(Qt6 REQUIRED COMPONENTS Quick Network Multimedia QuickControls2 LinguistTools)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
@@ -62,6 +62,12 @@ qt_add_qml_module(appIncomUdon
         net/JitterBuffer.cpp
         net/udptransport.h
         net/udptransport.cpp
+)
+
+qt_add_translations(appIncomUdon
+    TS_FILES
+        i18n/incomudon_ja.ts
+    RESOURCE_PREFIX "/i18n"
 )
 
 option(USE_CODEC2 "Build with bundled libcodec2" ON)

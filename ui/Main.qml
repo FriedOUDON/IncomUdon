@@ -65,6 +65,37 @@ Window {
         readonly property int safeInsetLeft: SafeArea.margins.left
         readonly property int safeInsetRight: SafeArea.margins.right
 
+        function localizedStatus(status) {
+            var s = (status || "").toString()
+            if (s === "Disconnected")
+                return qsTr("Disconnected")
+            if (s === "Connecting...")
+                return qsTr("Connecting...")
+            if (s === "Ready")
+                return qsTr("Ready")
+            if (s === "No response")
+                return qsTr("No response")
+            if (s === "TX")
+                return "TX"
+            if (s === "Microphone permission denied")
+                return qsTr("Microphone permission denied")
+            if (s.indexOf("Busy:") === 0)
+                return qsTr("Busy: ") + s.slice(5).trim()
+            if (s.indexOf("Bind failed: ") === 0)
+                return qsTr("Bind failed: ") + s.slice(13)
+            if (s === "Invalid channel id")
+                return qsTr("Invalid channel id")
+            if (s === "Invalid server address")
+                return qsTr("Invalid server address")
+            if (s === "Failed to resolve server address")
+                return qsTr("Failed to resolve server address")
+            if (s === "Invalid server port")
+                return qsTr("Invalid server port")
+            if (s === "Transport or Packetizer is not set")
+                return qsTr("Transport or Packetizer is not set")
+            return s
+        }
+
         function clampInt(v, minValue, maxValue, fallback) {
             var n = parseInt(v)
             if (isNaN(n))
@@ -106,7 +137,7 @@ Window {
 
         function refreshLicensesText() {
             if (!licenseProvider) {
-                licensesText = "License provider is not available."
+                licensesText = qsTr("License provider is not available.")
                 return
             }
             licensesText = licenseProvider.combinedLicenses()
@@ -821,9 +852,12 @@ Window {
 
         FileDialog {
             id: cueFileDialog
-            title: "Select audio file"
+            title: qsTr("Select audio file")
             fileMode: FileDialog.OpenFile
-            nameFilters: ["Audio files (*.wav *.ogg *.mp3 *.m4a)", "All files (*)"]
+            nameFilters: [
+                qsTr("Audio files (*.wav *.ogg *.mp3 *.m4a)"),
+                qsTr("All files (*)")
+            ]
             onAccepted: {
                 var selected = selectedFile
                 if (!selected || selected.toString().length === 0)
@@ -842,9 +876,12 @@ Window {
 
         FileDialog {
             id: codec2LibFileDialog
-            title: "Select codec2 dynamic library"
+            title: qsTr("Select codec2 dynamic library")
             fileMode: FileDialog.OpenFile
-            nameFilters: ["Dynamic libraries (*.dll *.so *.dylib)", "All files (*)"]
+            nameFilters: [
+                qsTr("Dynamic libraries (*.dll *.so *.dylib)"),
+                qsTr("All files (*)")
+            ]
             onAccepted: {
                 var selected = selectedFile
                 if (!selected || selected.toString().length === 0)
@@ -855,9 +892,12 @@ Window {
 
         FileDialog {
             id: opusLibFileDialog
-            title: "Select opus dynamic library"
+            title: qsTr("Select opus dynamic library")
             fileMode: FileDialog.OpenFile
-            nameFilters: ["Dynamic libraries (*.dll *.so *.dylib)", "All files (*)"]
+            nameFilters: [
+                qsTr("Dynamic libraries (*.dll *.so *.dylib)"),
+                qsTr("All files (*)")
+            ]
             onAccepted: {
                 var selected = selectedFile
                 if (!selected || selected.toString().length === 0)
@@ -872,7 +912,7 @@ Window {
             y: tabRow.y + menuButton.height
 
             MenuItem {
-                text: "Licenses"
+                text: qsTr("Licenses")
                 onTriggered: {
                     root.refreshLicensesText()
                     licensesDialog.open()
@@ -880,7 +920,7 @@ Window {
             }
 
             MenuItem {
-                text: "Download libcodec2.so"
+                text: qsTr("Download libcodec2.so")
                 onTriggered: Qt.openUrlExternally(root.codec2DownloadUrl)
             }
         }
@@ -888,7 +928,7 @@ Window {
         Dialog {
             id: licensesDialog
             modal: true
-            title: "Licenses"
+            title: qsTr("Licenses")
             x: Math.round((root.width - width) / 2)
             y: Math.round((root.height - height) / 2)
             width: Math.min(root.width - 20, 640)
@@ -926,8 +966,8 @@ Window {
                     width: parent.width - menuButton.width - tabRow.spacing
                     onCurrentIndexChanged: persisted.pageIndex = currentIndex
 
-                    TabButton { text: "Page A" }
-                    TabButton { text: "Page B" }
+                    TabButton { text: qsTr("Page A") }
+                    TabButton { text: qsTr("Page B") }
                 }
 
                 ToolButton {
@@ -991,7 +1031,8 @@ Window {
 
                     Text {
                         anchors.centerIn: parent
-                        text: appState.pttPressed ? "PTT ON" : "PTT OFF"
+                        text: appState.pttPressed ? qsTr("PTT ON")
+                                                  : qsTr("PTT OFF")
                         color: "#0b0f13"
                         font.pixelSize: 29
                     }
@@ -1014,8 +1055,8 @@ Window {
                     text: appState.linkStatus === "TX" &&
                           appState.talkTimeoutSec > 0 &&
                           root.txTimeoutRemainingSec > 0 ?
-                              ("Remaining: " + root.txTimeoutRemainingSec + "s") :
-                              "Hold to talk"
+                              (qsTr("Remaining: ") + root.txTimeoutRemainingSec + "s") :
+                              qsTr("Hold to talk")
                     color: "#607d8b"
                     font.pixelSize: 15
                     horizontalAlignment: Text.AlignHCenter
@@ -1046,7 +1087,7 @@ Window {
                             spacing: 4
 
                             Text {
-                                text: "Codec Bitrate (bps)"
+                                text: qsTr("Codec Bitrate (bps)")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1065,7 +1106,7 @@ Window {
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "Codec2"
+                                        text: qsTr("Codec2")
                                         color: root.codec2Selectable ?
                                                    (appState.codecSelection === 1 ? "#0b0f13" : "#cfd8dc") :
                                                    "#607d8b"
@@ -1089,7 +1130,7 @@ Window {
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "Opus"
+                                        text: qsTr("Opus")
                                         color: root.opusSelectable ?
                                                    (appState.codecSelection === 2 ? "#0b0f13" : "#cfd8dc") :
                                                    "#607d8b"
@@ -1112,7 +1153,7 @@ Window {
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "PCM"
+                                        text: qsTr("PCM")
                                         color: appState.codecSelection === 0 ? "#0b0f13" : "#cfd8dc"
                                         font.pixelSize: 14
                                     }
@@ -1157,20 +1198,20 @@ Window {
 
                             Text {
                                 visible: appState.codecSelection === 1 && !root.codec2Selectable
-                                text: "Codec2 unavailable: select and load a dynamic library."
+                                text: qsTr("Codec2 unavailable: select and load a dynamic library.")
                                 color: "#78909c"
                                 font.pixelSize: 12
                             }
 
                             Text {
                                 visible: appState.codecSelection === 2 && !root.opusSelectable
-                                text: "Opus unavailable: place and link libopus prebuilt library."
+                                text: qsTr("Opus unavailable: place and link libopus prebuilt library.")
                                 color: "#78909c"
                                 font.pixelSize: 12
                             }
 
                             Text {
-                                text: "Mic Volume"
+                                text: qsTr("Mic Volume")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1206,7 +1247,7 @@ Window {
                             }
 
                             Text {
-                                text: "Speaker Volume"
+                                text: qsTr("Speaker Volume")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1242,7 +1283,7 @@ Window {
                             }
 
                             Text {
-                                text: "Channel ID"
+                                text: qsTr("Channel ID")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1268,7 +1309,7 @@ Window {
                             }
 
                             Text {
-                                text: "Password"
+                                text: qsTr("Password")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1304,7 +1345,7 @@ Window {
                                     verticalAlignment: Text.AlignVCenter
                                     color: "#607d8b"
                                     font.pixelSize: Math.round(parent.height * 0.30)
-                                    text: "(変更無し)"
+                                    text: qsTr("(unchanged)")
                                     visible: !passwordInput.activeFocus &&
                                              passwordInput.text.length === 0 &&
                                              root.password.length > 0
@@ -1326,7 +1367,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Connect"
+                                    text: qsTr("Connect")
                                     color: "#0b0f13"
                                     font.pixelSize: 17
                                 }
@@ -1349,19 +1390,23 @@ Window {
                             }
 
                             Text {
-                                text: "Channel: " + appState.currentChannelId + "  Self: " + appState.selfId
+                                text: qsTr("Channel: ")
+                                      + appState.currentChannelId
+                                      + "  "
+                                      + qsTr("Self: ")
+                                      + appState.selfId
                                 color: "#cfd8dc"
                                 font.pixelSize: 17
                             }
 
                             Text {
-                                text: "Status: " + appState.linkStatus
+                                text: qsTr("Status: ") + root.localizedStatus(appState.linkStatus)
                                 color: "#90a4ae"
                                 font.pixelSize: 15
                             }
 
                             Text {
-                                text: "Talker: " + appState.talkerId
+                                text: qsTr("Talker: ") + appState.talkerId
                                 color: "#78909c"
                                 font.pixelSize: 15
                             }
@@ -1396,7 +1441,7 @@ Window {
                             spacing: 10
 
                             Text {
-                                text: "Server Address"
+                                text: qsTr("Server Address")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1421,7 +1466,7 @@ Window {
                         }
 
                         Text {
-                            text: "Server Port"
+                            text: qsTr("Server Port")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1447,7 +1492,7 @@ Window {
                         }
 
                         Text {
-                            text: "Sender ID"
+                            text: qsTr("Sender ID")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1477,7 +1522,7 @@ Window {
                         }
 
                         Text {
-                            text: "Microphone Device"
+                            text: qsTr("Microphone Device")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1504,7 +1549,7 @@ Window {
                         }
 
                         Text {
-                            text: "Mic Input Session"
+                            text: qsTr("Mic Input Session")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1522,7 +1567,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Auto 60s"
+                                    text: qsTr("Auto 60s")
                                     color: !appState.keepMicSessionAlwaysOn ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 14
                                 }
@@ -1540,7 +1585,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Always On"
+                                    text: qsTr("Always On")
                                     color: appState.keepMicSessionAlwaysOn ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 14
                                 }
@@ -1551,14 +1596,14 @@ Window {
 
                             Text {
                                 text: appState.keepMicSessionAlwaysOn ?
-                                          "Warning: Always On increases battery usage." :
-                                          "Auto 60s: keeps mic session for 60s after last PTT, then closes."
+                                          qsTr("Warning: Always On increases battery usage.") :
+                                          qsTr("Auto 60s: keeps mic session for 60s after last PTT, then closes.")
                                 color: "#607d8b"
                                 font.pixelSize: 13
                             }
 
                             Text {
-                                text: "Noise Suppressor"
+                                text: qsTr("Noise Suppressor")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
                             }
@@ -1576,7 +1621,7 @@ Window {
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "Off"
+                                        text: qsTr("Off")
                                         color: !appState.noiseSuppressionEnabled ? "#0b0f13" : "#cfd8dc"
                                         font.pixelSize: 14
                                     }
@@ -1594,7 +1639,7 @@ Window {
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: "On"
+                                        text: qsTr("On")
                                         color: appState.noiseSuppressionEnabled ? "#0b0f13" : "#cfd8dc"
                                         font.pixelSize: 14
                                     }
@@ -1637,14 +1682,14 @@ Window {
 
                             Text {
                                 text: appState.noiseSuppressionEnabled ?
-                                          "Higher values suppress ambient noise more strongly." :
-                                          "Noise suppression is disabled."
+                                          qsTr("Higher values suppress ambient noise more strongly.") :
+                                          qsTr("Noise suppression is disabled.")
                                 color: "#607d8b"
                                 font.pixelSize: 12
                             }
 
                         Text {
-                            text: "TX FEC (RS 2-loss)"
+                            text: qsTr("TX FEC (RS 2-loss)")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1662,7 +1707,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Off"
+                                    text: qsTr("Off")
                                     color: !appState.fecEnabled ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 14
                                 }
@@ -1680,7 +1725,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "On"
+                                    text: qsTr("On")
                                     color: appState.fecEnabled ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 14
                                 }
@@ -1690,7 +1735,7 @@ Window {
                         }
 
                         Text {
-                            text: "Network QoS (DSCP EF)"
+                            text: qsTr("Network QoS (DSCP EF)")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1708,7 +1753,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Off"
+                                    text: qsTr("Off")
                                     color: !appState.qosEnabled ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 14
                                 }
@@ -1726,7 +1771,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "On"
+                                    text: qsTr("On")
                                     color: appState.qosEnabled ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 14
                                 }
@@ -1737,14 +1782,14 @@ Window {
 
                         Text {
                             text: appState.qosEnabled ?
-                                      "Voice packets request priority with DSCP EF (network may ignore it)." :
-                                      "QoS marking is disabled."
+                                      qsTr("Voice packets request priority with DSCP EF (network may ignore it).") :
+                                      qsTr("QoS marking is disabled.")
                             color: "#607d8b"
                             font.pixelSize: 12
                         }
 
                         Text {
-                            text: "Encryption"
+                            text: qsTr("Encryption")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1763,7 +1808,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "AES-GCM"
+                                    text: qsTr("AES-GCM")
                                     color: appState.cryptoMode === 0 ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 15
                                 }
@@ -1784,7 +1829,7 @@ Window {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Legacy"
+                                    text: qsTr("Legacy")
                                     color: appState.cryptoMode === 1 ? "#0b0f13" : "#cfd8dc"
                                     font.pixelSize: 15
                                 }
@@ -1795,14 +1840,14 @@ Window {
 
                         Text {
                             text: appState.opensslAvailable ?
-                                      "OpenSSL available" :
-                                      "OpenSSL not available (Legacy only)"
+                                      qsTr("OpenSSL available") :
+                                      qsTr("OpenSSL not available (Legacy only)")
                             color: "#607d8b"
                             font.pixelSize: 13
                         }
 
                         Text {
-                            text: "Codec2 Dynamic Library"
+                            text: qsTr("Codec2 Dynamic Library")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1819,7 +1864,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Pick"
+                                    text: qsTr("Pick")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -1835,7 +1880,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Clear"
+                                    text: qsTr("Clear")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -1846,7 +1891,7 @@ Window {
                         Text {
                             text: appState.codec2LibraryPath.length > 0 ?
                                       root.fileNameFromUrl(appState.codec2LibraryPath) :
-                                      "(auto search)"
+                                      qsTr("(auto search)")
                             color: "#607d8b"
                             font.pixelSize: 12
                         }
@@ -1855,16 +1900,16 @@ Window {
                             width: parent.width
                             wrapMode: Text.Wrap
                             text: appState.codec2LibraryLoaded ?
-                                      "Codec2 library loaded" :
+                                      qsTr("Codec2 library loaded") :
                                       (appState.codec2LibraryError.length > 0 ?
                                            appState.codec2LibraryError :
-                                           "Codec2 library not loaded (PCM fallback)")
+                                           qsTr("Codec2 library not loaded (PCM fallback)"))
                             color: appState.codec2LibraryLoaded ? "#4db6ac" : "#78909c"
                             font.pixelSize: 12
                         }
 
                         Text {
-                            text: "Opus Dynamic Library (Optional)"
+                            text: qsTr("Opus Dynamic Library (Optional)")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
@@ -1881,7 +1926,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Pick"
+                                    text: qsTr("Pick")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -1897,7 +1942,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Clear"
+                                    text: qsTr("Clear")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -1908,7 +1953,7 @@ Window {
                         Text {
                             text: appState.opusLibraryPath.length > 0 ?
                                       root.fileNameFromUrl(appState.opusLibraryPath) :
-                                      "(using linked opus)"
+                                      qsTr("(using linked opus)")
                             color: "#607d8b"
                             font.pixelSize: 12
                         }
@@ -1917,12 +1962,12 @@ Window {
                             width: parent.width
                             wrapMode: Text.Wrap
                             text: appState.opusLibraryPath.length === 0 ?
-                                      "Using linked Opus library." :
+                                      qsTr("Using linked Opus library.") :
                                       (appState.opusLibraryLoaded ?
-                                           "Loaded user-specified Opus library." :
+                                           qsTr("Loaded user-specified Opus library.") :
                                            (appState.opusLibraryError.length > 0 ?
                                                 appState.opusLibraryError :
-                                                "Opus library not loaded (linked fallback)."))
+                                                qsTr("Opus library not loaded (linked fallback).")))
                             color: (appState.opusLibraryPath.length === 0 || appState.opusLibraryLoaded) ?
                                        "#4db6ac" : "#78909c"
                             font.pixelSize: 12
@@ -1936,13 +1981,13 @@ Window {
                         }
 
                         Text {
-                            text: "Cue Sounds"
+                            text: qsTr("Cue Sounds")
                             color: "#90a4ae"
                             font.pixelSize: 13
                         }
 
                         Text {
-                            text: "Cue Volume"
+                            text: qsTr("Cue Volume")
                             color: "#cfd8dc"
                             font.pixelSize: 14
                         }
@@ -1981,7 +2026,7 @@ Window {
 
                             Text {
                                 width: 96
-                                text: "PTT ON"
+                                text: qsTr("PTT ON")
                                 color: "#cfd8dc"
                                 font.pixelSize: 14
                             }
@@ -2000,7 +2045,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Pick"
+                                    text: qsTr("Pick")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -2021,7 +2066,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Default"
+                                    text: qsTr("Default")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -2058,7 +2103,7 @@ Window {
 
                             Text {
                                 width: 96
-                                text: "PTT OFF"
+                                text: qsTr("PTT OFF")
                                 color: "#cfd8dc"
                                 font.pixelSize: 14
                             }
@@ -2077,7 +2122,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Pick"
+                                    text: qsTr("Pick")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -2098,7 +2143,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Default"
+                                    text: qsTr("Default")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -2135,7 +2180,7 @@ Window {
 
                             Text {
                                 width: 96
-                                text: "Carrier Sense"
+                                text: qsTr("Carrier Sense")
                                 color: "#cfd8dc"
                                 font.pixelSize: 14
                             }
@@ -2154,7 +2199,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Pick"
+                                    text: qsTr("Pick")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
@@ -2175,7 +2220,7 @@ Window {
                                 border.width: 1
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Default"
+                                    text: qsTr("Default")
                                     color: "#cfd8dc"
                                     font.pixelSize: 13
                                 }
