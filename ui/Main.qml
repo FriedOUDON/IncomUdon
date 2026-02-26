@@ -374,13 +374,13 @@ Window {
             property int codecSelection: 0
             property int codecBitrate: 1600
             property int codec2Bitrate: 1600
-            property int opusBitrate: 6000
+            property int opusBitrate: 8000
             property bool forcePcm: true
             property bool txFecEnabled: true
             property bool qosEnabled: true
             property int cryptoMode: 0
             property int pageIndex: 0
-            property int micVolumePercent: 100
+            property int micVolumePercent: 200
             property bool noiseSuppressionEnabled: false
             property int noiseSuppressionLevel: 45
             property int speakerVolumePercent: 100
@@ -435,7 +435,7 @@ Window {
             appState.fecEnabled = persisted.txFecEnabled
             appState.qosEnabled = persisted.qosEnabled
             appState.cryptoMode = appState.opensslAvailable ? persisted.cryptoMode : 1
-            appState.micVolumePercent = root.clampInt(persisted.micVolumePercent, 0, 200, 100)
+            appState.micVolumePercent = root.clampInt(persisted.micVolumePercent, 0, 300, 200)
             appState.noiseSuppressionEnabled = persisted.noiseSuppressionEnabled
             appState.noiseSuppressionLevel = root.clampInt(persisted.noiseSuppressionLevel, 0, 100, 45)
             appState.speakerVolumePercent = root.clampInt(persisted.speakerVolumePercent, 0, 400, 100)
@@ -1010,8 +1010,8 @@ Window {
 
                 function snapMicVolume(value) {
                     var v = Math.round(value)
-                    if (Math.abs(v - 100) <= 3)
-                        return 100
+                    if (Math.abs(v - 200) <= 3)
+                        return 200
                     return v
                 }
 
@@ -1223,7 +1223,7 @@ Window {
                                 Slider {
                                     width: Math.max(120, pageAColumn.width - 52 - 8)
                                     from: 0
-                                    to: 200
+                                    to: 300
                                     stepSize: 1
                                     value: appState.micVolumePercent
                                     onMoved: appState.micVolumePercent = snapMicVolume(value)
@@ -1240,7 +1240,7 @@ Window {
                                     Text {
                                         anchors.centerIn: parent
                                         text: appState.micVolumePercent + "%"
-                                        color: appState.micVolumePercent === 100 ? "#4db6ac" : "#cfd8dc"
+                                        color: appState.micVolumePercent === 200 ? "#4db6ac" : "#cfd8dc"
                                         font.pixelSize: 14
                                     }
                                 }

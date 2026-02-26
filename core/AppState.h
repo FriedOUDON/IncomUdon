@@ -253,11 +253,11 @@ private:
     int m_codecSelection = CodecPcm;
     int m_codecBitrate = 1600;
     int m_codec2Bitrate = 1600;
-    int m_opusBitrate = 6000;
+    int m_opusBitrate = 8000;
     bool m_forcePcm = true;
     bool m_fecEnabled = true;
     bool m_qosEnabled = true;
-    int m_micVolumePercent = 100;
+    int m_micVolumePercent = 200;
     bool m_noiseSuppressionEnabled = false;
     int m_noiseSuppressionLevel = 45;
     int m_speakerVolumePercent = 100;

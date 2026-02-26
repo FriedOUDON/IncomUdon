@@ -111,7 +111,7 @@ private:
     QMediaDevices* m_mediaDevices = nullptr;
     int m_frameBytes = 320;
     int m_intervalMs = 20;
-    int m_inputGainPercent = 100;
+    int m_inputGainPercent = 200;
     bool m_noiseSuppressionEnabled = false;
     int m_noiseSuppressionLevel = 45;
     float m_noiseFloor = 0.0f;

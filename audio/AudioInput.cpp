@@ -140,7 +140,7 @@ int AudioInput::inputGainPercent() const
 
 void AudioInput::setInputGainPercent(int percent)
 {
-    m_inputGainPercent = qBound(0, percent, 200);
+    m_inputGainPercent = qBound(0, percent, 300);
 }
 
 QStringList AudioInput::inputDeviceNames() const

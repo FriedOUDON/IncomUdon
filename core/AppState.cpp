@@ -384,7 +384,7 @@ int AppState::micVolumePercent() const
 
 void AppState::setMicVolumePercent(int percent)
 {
-    const int normalized = qBound(0, percent, 200);
+    const int normalized = qBound(0, percent, 300);
     if (m_micVolumePercent == normalized)
         return;
 
