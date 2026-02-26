@@ -68,7 +68,7 @@
     </message>
     <message>
       <source>Codec2 library loaded</source>
-      <translation>Codec2 ライブラリ読込済み</translation>
+      <translation>Codec2 ライブラリ読込済</translation>
     </message>
     <message>
       <source>Codec2 library not loaded (PCM fallback)</source>
@@ -76,7 +76,7 @@
     </message>
     <message>
       <source>Codec2 unavailable: select and load a dynamic library.</source>
-      <translation>Codec2 は利用不可: 動的ライブラリを選択して読み込んでください。</translation>
+      <translation>Codec2 利用不可: 動的ライブラリを選択して読み込んでください。</translation>
     </message>
     <message>
       <source>Connect</source>
@@ -148,7 +148,7 @@
     </message>
     <message>
       <source>Noise Suppressor</source>
-      <translation>ノイズサプレッサー</translation>
+      <translation>ノイズ抑制</translation>
     </message>
     <message>
       <source>Noise suppression is disabled.</source>
@@ -184,7 +184,7 @@
     </message>
     <message>
       <source>Opus unavailable: place and link libopus prebuilt library.</source>
-      <translation>Opus は利用不可: libopus の事前ビルドを配置してリンクしてください。</translation>
+      <translation>Opus は利用不可: libopus のプリビルドを配置してリンクしてください。</translation>
     </message>
     <message>
       <source>PCM</source>
