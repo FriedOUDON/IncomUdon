@@ -87,27 +87,6 @@ static QByteArray blendBoundaryPcm16(const QByteArray& prevPcm,
     return out;
 }
 
-static QByteArray scalePcm16(const QByteArray& pcm, float gain)
-{
-    if (pcm.isEmpty() || gain >= 0.999f)
-        return pcm;
-
-    QByteArray out = pcm;
-    const char* inPtr = pcm.constData();
-    char* outPtr = out.data();
-    const int totalSamples = pcm.size() / static_cast<int>(sizeof(qint16));
-    for (int i = 0; i < totalSamples; ++i)
-    {
-        const qint16 sample = qFromLittleEndian<qint16>(
-            reinterpret_cast<const uchar*>(inPtr + i * static_cast<int>(sizeof(qint16))));
-        const float scaled = static_cast<float>(sample) * gain;
-        const qint16 mixed = static_cast<qint16>(qBound(-32768, static_cast<int>(qRound(scaled)), 32767));
-        const qint16 le = qToLittleEndian<qint16>(mixed);
-        std::memcpy(outPtr + i * static_cast<int>(sizeof(qint16)), &le, sizeof(le));
-    }
-    return out;
-}
-
 static QByteArray holdDecayFromTailPcm16(const QByteArray& pcm)
 {
     if (pcm.isEmpty())
@@ -776,85 +755,31 @@ void ChannelManager::onPlayoutTick()
     QByteArray encoded = m_jitter->popFrame(false);
     if (encoded.isEmpty())
     {
-        if (pcmMode)
+        if (m_audioOutput && m_audioOutput->queuedMs() > (m_playoutFrameMs * 2))
         {
-            if (m_audioOutput && m_audioOutput->queuedMs() > (m_playoutFrameMs * 2))
-            {
-                // Output side still has buffered audio; do not inject synthetic frames yet.
-                return;
-            }
-            ++m_pcmMissCount;
-            if (m_pcmMissCount <= 1 && !m_lastPcmFrame.isEmpty())
-            {
-                const QByteArray plc = holdDecayFromTailPcm16(m_lastPcmFrame);
-                m_audioOutput->playFrame(plc);
-                emit audioFrameReceived(plc);
-                return;
-            }
-            if (!m_silenceMode && !m_lastPcmFrame.isEmpty())
-            {
-                const QByteArray faded = crossfadePcm16(m_lastPcmFrame,
-                                                        m_silenceFrame,
-                                                        m_crossfadeSamples);
-                m_audioOutput->playFrame(faded);
-                emit audioFrameReceived(faded);
-                m_silenceMode = true;
-                m_plcRemaining = 0;
-                return;
-            }
-            m_silenceMode = true;
-            m_plcRemaining = 0;
-            m_audioOutput->playFrame(m_silenceFrame);
-            emit audioFrameReceived(m_silenceFrame);
+            // Output side still has buffered audio; avoid injecting synthetic frames.
             return;
         }
 
-        const bool opusMode = (m_codec && m_codec->opusActive());
-        const int plcFrames = m_plcMaxFrames;
-        if (opusMode)
-        {
-            if (m_plcRemaining == 0)
-                m_plcRemaining = plcFrames;
-
-            if (m_plcRemaining > 0)
-            {
-                QByteArray plc = m_codec->decode(QByteArray());
-                if (plc.isEmpty())
-                    plc = m_silenceFrame;
-
-                m_audioOutput->playFrame(plc);
-                emit audioFrameReceived(plc);
-                m_lastPcmFrame = plc;
-                m_silenceMode = false;
-                m_plcRemaining--;
-                if (m_plcRemaining == 0)
-                    m_plcRemaining = -1;
-                return;
-            }
-        }
-        else if (!m_lastPcmFrame.isEmpty())
-        {
-            if (!m_silenceMode)
-                m_silenceMode = true;
-            if (m_plcRemaining == 0)
-                m_plcRemaining = plcFrames;
-
-            if (m_plcRemaining > 0)
-            {
-                float gain = static_cast<float>(m_plcRemaining) /
-                             static_cast<float>(qMax(1, plcFrames));
-                const QByteArray plc = scalePcm16(m_lastPcmFrame, gain);
-                m_audioOutput->playFrame(plc);
-                emit audioFrameReceived(plc);
-                m_plcRemaining--;
-                if (m_plcRemaining == 0)
-                    m_plcRemaining = -1;
-                return;
-            }
-        }
+        ++m_pcmMissCount;
         m_plcRemaining = 0;
-        m_silenceMode = true;
 
+        if (!m_silenceMode && !m_lastPcmFrame.isEmpty())
+        {
+            // One short decay frame, then pure silence until a real frame arrives.
+            QByteArray decay = holdDecayFromTailPcm16(m_lastPcmFrame);
+            if (decay.isEmpty())
+                decay = crossfadePcm16(m_lastPcmFrame, m_silenceFrame, m_crossfadeSamples);
+            if (decay.isEmpty())
+                decay = m_silenceFrame;
+
+            m_audioOutput->playFrame(decay);
+            emit audioFrameReceived(decay);
+            m_silenceMode = true;
+            return;
+        }
+
+        m_silenceMode = true;
         m_audioOutput->playFrame(m_silenceFrame);
         emit audioFrameReceived(m_silenceFrame);
         return;

@@ -28,7 +28,9 @@ bool AndroidPttBridge::initialize()
     QJniEnvironment env;
     const JNINativeMethod methods[] = {
         {"onHeadsetPttChanged", "(Z)V",
-         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnHeadsetPttChanged)}
+         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnHeadsetPttChanged)},
+        {"onNetworkAvailabilityChanged", "(Z)V",
+         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnNetworkAvailabilityChanged)}
     };
 
     const bool ok = env.registerNativeMethods("com/friedoudon/incomudon/IncomUdonActivity",
@@ -110,6 +112,19 @@ void AndroidPttBridge::nativeOnHeadsetPttChanged(JNIEnv* env, jclass clazz, jboo
     QMetaObject::invokeMethod(&AndroidPttBridge::instance(),
                               [isPressed]() {
         emit AndroidPttBridge::instance().headsetButtonChanged(isPressed);
+    },
+                              Qt::QueuedConnection);
+}
+
+void AndroidPttBridge::nativeOnNetworkAvailabilityChanged(JNIEnv* env, jclass clazz, jboolean available)
+{
+    Q_UNUSED(env)
+    Q_UNUSED(clazz)
+
+    const bool isAvailable = (available == JNI_TRUE);
+    QMetaObject::invokeMethod(&AndroidPttBridge::instance(),
+                              [isAvailable]() {
+        emit AndroidPttBridge::instance().networkAvailabilityChanged(isAvailable);
     },
                               Qt::QueuedConnection);
 }

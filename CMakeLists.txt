@@ -38,6 +38,8 @@ qt_add_qml_module(appIncomUdon
         codec/Codec2Wrapper.cpp
         core/AppState.h
         core/AppState.cpp
+        core/CryptoUtils.h
+        core/CryptoUtils.cpp
         core/AndroidPttBridge.h
         core/AndroidPttBridge.cpp
         core/LicenseProvider.h
@@ -883,12 +885,18 @@ set_target_properties(appIncomUdon PROPERTIES
 )
 
 if(ANDROID)
+    if(CMAKE_HOST_WIN32)
+        # Keep androiddeployqt output folder as short as possible on Windows.
+        set(QT_USE_TARGET_ANDROID_BUILD_DIR OFF CACHE BOOL
+            "Use android-build-<target> output directories on Android" FORCE)
+    endif()
+
     set_property(TARGET appIncomUdon PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
         "${CMAKE_CURRENT_SOURCE_DIR}/android")
     set_target_properties(appIncomUdon PROPERTIES
         OUTPUT_NAME "IncomUdon"
     )
-    if(DEFINED ENV{INCOMUDON_ANDROID_BUILD_DIR})
+    if(DEFINED ENV{INCOMUDON_ANDROID_BUILD_DIR} AND NOT "$ENV{INCOMUDON_ANDROID_BUILD_DIR}" STREQUAL "")
         file(TO_CMAKE_PATH "$ENV{INCOMUDON_ANDROID_BUILD_DIR}" _android_build_dir)
         set_property(TARGET appIncomUdon PROPERTY QT_ANDROID_BUILD_DIR
             "${_android_build_dir}")

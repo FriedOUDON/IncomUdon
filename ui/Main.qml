@@ -152,6 +152,14 @@ Window {
             return mode
         }
 
+        function normalizedPasswordHash(text) {
+            if (!text || text.length === 0)
+                return ""
+            if (cryptoUtils)
+                return cryptoUtils.normalizePasswordHashHex(text.toString())
+            return text.toString()
+        }
+
         function tryAutoConnectOnStartup() {
             if (startupAutoConnectDone)
                 return
@@ -159,6 +167,7 @@ Window {
 
             var addr = (root.serverAddress || "").toString().trim()
             var passwordText = (root.password || "").toString()
+            var passwordHash = root.normalizedPasswordHash(passwordText)
             var port = parseInt(root.serverPort)
             var channel = parseInt(root.channelId)
 
@@ -168,10 +177,10 @@ Window {
                 return
             if (!isFinite(channel) || channel <= 0)
                 return
-            if (passwordText.length === 0)
+            if (passwordHash.length === 0)
                 return
 
-            channelManager.connectToServer(channel, addr, port, passwordText)
+            channelManager.connectToServer(channel, addr, port, passwordHash)
         }
 
         function startTxTimeoutCountdown() {
@@ -318,6 +327,8 @@ Window {
             property string password: ""
             property int codecSelection: 0
             property int codecBitrate: 1600
+            property int codec2Bitrate: 1600
+            property int opusBitrate: 6000
             property bool forcePcm: true
             property bool txFecEnabled: true
             property bool qosEnabled: true
@@ -351,16 +362,29 @@ Window {
             }
             root.channelId = persisted.channelId
             root.password = persisted.password
+            if (root.password.length > 0) {
+                const normalizedStoredPassword = root.normalizedPasswordHash(root.password)
+                root.password = normalizedStoredPassword
+                persisted.password = normalizedStoredPassword
+            }
 
             var initialCodecSelection = root.clampInt(
                         persisted.codecSelection,
                         0,
                         2,
                         persisted.forcePcm ? 0 : 1)
+            var initialCodec2Bitrate = root.normalizeBitrateForSelection(persisted.codec2Bitrate, 1)
+            var initialOpusBitrate = root.normalizeBitrateForSelection(persisted.opusBitrate, 2)
+            if (persisted.codecSelection === 2) {
+                initialOpusBitrate = root.normalizeBitrateForSelection(persisted.codecBitrate, 2)
+            } else {
+                initialCodec2Bitrate = root.normalizeBitrateForSelection(persisted.codecBitrate, 1)
+            }
+            persisted.codec2Bitrate = initialCodec2Bitrate
+            persisted.opusBitrate = initialOpusBitrate
             appState.codecSelection = initialCodecSelection
-            appState.codecBitrate = root.normalizeBitrateForSelection(
-                        persisted.codecBitrate,
-                        initialCodecSelection)
+            appState.codecBitrate = initialCodecSelection === 2 ?
+                        initialOpusBitrate : initialCodec2Bitrate
             appState.fecEnabled = persisted.txFecEnabled
             appState.qosEnabled = persisted.qosEnabled
             appState.cryptoMode = appState.opensslAvailable ? persisted.cryptoMode : 1
@@ -395,7 +419,7 @@ Window {
         onServerAddressChanged: persisted.serverAddress = serverAddress
         onServerPortChanged: persisted.serverPort = serverPort
         onChannelIdChanged: persisted.channelId = channelId
-        onPasswordChanged: persisted.password = password
+        onPasswordChanged: persisted.password = root.normalizedPasswordHash(password)
         onPttOnSoundEnabledChanged: persisted.pttOnSoundEnabled = pttOnSoundEnabled
         onPttOffSoundEnabledChanged: persisted.pttOffSoundEnabled = pttOffSoundEnabled
         onCarrierSenseSoundEnabledChanged: persisted.carrierSenseSoundEnabled = carrierSenseSoundEnabled
@@ -410,6 +434,10 @@ Window {
             function onCodecSelectionChanged() { persisted.codecSelection = appState.codecSelection }
             function onCodecBitrateChanged() {
                 persisted.codecBitrate = appState.codecBitrate
+                if (appState.codecSelection === 2)
+                    persisted.opusBitrate = appState.codecBitrate
+                else
+                    persisted.codec2Bitrate = appState.codecBitrate
             }
             function onForcePcmChanged() {
                 if (!root.suppressForcePcmPersistence)
@@ -592,6 +620,8 @@ Window {
         }
 
         function playCarrierSenseCue() {
+            if (appState.pttPressed)
+                appState.pttPressed = false
             var nowMs = Date.now()
             if (nowMs - root.lastCarrierCueMs < 150)
                 return
@@ -601,6 +631,12 @@ Window {
                             root.carrierSenseSoundEnabled,
                             root.defaultCarrierSenseSoundUrl,
                             "carrierCuePending")
+        }
+
+        function handleTxTimeout() {
+            if (appState.pttPressed)
+                appState.pttPressed = false
+            root.playCarrierSenseCue()
         }
 
         function playPttOnCue() {
@@ -646,8 +682,10 @@ Window {
         Connections {
             target: channelManager
             function onTalkReleasePacketDetected(talkerId) {
-                // Intentionally no cue here.
-                // ptt_off must be played only after playout drain completes.
+                // If we are still pressing while our own talk is forcibly released,
+                // treat it as timeout and force local TX off.
+                if (talkerId === appState.selfId && appState.pttPressed)
+                    root.handleTxTimeout()
             }
             function onTalkReleasePlayoutCompleted(talkerId) {
                 if (talkerId === 0)
@@ -707,7 +745,7 @@ Window {
                 if (root.txTimeoutRemainingSec > 0)
                     root.txTimeoutRemainingSec = root.txTimeoutRemainingSec - 1
                 if (root.txTimeoutRemainingSec <= 0) {
-                    appState.pttPressed = false
+                    root.handleTxTimeout()
                     root.stopTxTimeoutCountdown()
                 }
             }
@@ -1265,7 +1303,7 @@ Window {
                                                   parseInt(root.channelId),
                                                   root.serverAddress,
                                                   parseInt(root.serverPort),
-                                                  root.password)
+                                                  root.normalizedPasswordHash(root.password))
                                 }
                             }
 

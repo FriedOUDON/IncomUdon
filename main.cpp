@@ -2,6 +2,7 @@
 #include <QGuiApplication>
 #include <QHostAddress>
 #include <QElapsedTimer>
+#include <QHash>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QRandomGenerator>
@@ -21,6 +22,7 @@
 #include "core/AndroidPttBridge.h"
 #include "core/AppState.h"
 #include "core/ChannelManager.h"
+#include "core/CryptoUtils.h"
 #include "core/LicenseProvider.h"
 #include "core/PttController.h"
 #include "crypto/AeadCipher.h"
@@ -47,6 +49,7 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
 
     AppState appState;
+    CryptoUtils cryptoUtils;
     LicenseProvider licenseProvider;
     AudioInput audioInput;
     AudioOutput audioOutput;
@@ -63,12 +66,23 @@ int main(int argc, char *argv[])
     PttController pttController;
     QHostAddress currentServerAddress;
     quint16 currentServerPort = 0;
+    quint32 reconnectChannelId = 0;
+    QString reconnectServerAddress;
+    quint16 reconnectServerPort = 0;
+    QString reconnectPassword;
     bool suppressCodecBroadcast = false;
     int lastSentCodecMode = -1;
     int lastSentCodecId = -1;
-    quint32 lastRxConfigSender = 0;
-    int lastRxConfigMode = -1;
-    int lastRxConfigCodecId = -1;
+    struct RxCodecConfig
+    {
+        int mode = 1600;
+        int codecId = Proto::CODEC_TRANSPORT_CODEC2;
+    };
+    QHash<quint32, RxCodecConfig> rxCodecConfigBySender;
+    quint32 currentTalkerId = 0;
+    quint32 appliedRxCodecSender = 0;
+    int appliedRxCodecMode = -1;
+    int appliedRxCodecId = -1;
     QHostAddress lastSentAddress;
     quint16 lastSentPort = 0;
     std::function<void(bool)> sendCodecConfig = [](bool) {};
@@ -135,6 +149,9 @@ int main(int argc, char *argv[])
 
 #ifdef Q_OS_ANDROID
     androidPttBridge.initialize();
+    QTimer androidNetworkReconnectTimer;
+    androidNetworkReconnectTimer.setSingleShot(true);
+    androidNetworkReconnectTimer.setInterval(1200);
     auto isLikelyBluetoothInputName = [](const QString& name) {
         const QString n = name.toLower();
         return n.contains(QStringLiteral("bluetooth")) ||
@@ -259,6 +276,48 @@ int main(int argc, char *argv[])
         if (appState.pttPressed() || pttController.pttPressed())
             return;
         androidPttBridge.setPttAudioRouteEnabled(false);
+    });
+
+    QObject::connect(&androidPttBridge, &AndroidPttBridge::networkAvailabilityChanged,
+                     &appState,
+                     [&androidNetworkReconnectTimer,
+                      &reconnectChannelId, &reconnectServerAddress, &reconnectServerPort](bool available) {
+        if (!available)
+        {
+            androidNetworkReconnectTimer.stop();
+            return;
+        }
+        if (reconnectChannelId == 0 ||
+            reconnectServerPort == 0 ||
+            reconnectServerAddress.isEmpty())
+        {
+            return;
+        }
+        androidNetworkReconnectTimer.start();
+    });
+    QObject::connect(&androidNetworkReconnectTimer, &QTimer::timeout,
+                     &appState,
+                     [&appState, &channelManager,
+                      &reconnectChannelId, &reconnectServerAddress, &reconnectServerPort,
+                      &reconnectPassword]() {
+        if (reconnectChannelId == 0 ||
+            reconnectServerPort == 0 ||
+            reconnectServerAddress.isEmpty())
+        {
+            return;
+        }
+
+        if (appState.pttPressed())
+            appState.setPttPressed(false);
+
+        logCodecStatus(QStringLiteral("Android network change detected: reconnecting ch=%1 addr=%2 port=%3")
+                           .arg(reconnectChannelId)
+                           .arg(reconnectServerAddress)
+                           .arg(reconnectServerPort));
+        channelManager.connectToServer(static_cast<int>(reconnectChannelId),
+                                       reconnectServerAddress,
+                                       static_cast<int>(reconnectServerPort),
+                                       reconnectPassword);
     });
 #endif
 
@@ -492,9 +551,76 @@ int main(int argc, char *argv[])
                            .arg(codecTx.opusActive() ? 1 : 0));
     });
 
+    const auto normalizeCodecId = [](int codecId, bool pcmOnly) {
+        if (pcmOnly || codecId == Proto::CODEC_TRANSPORT_PCM)
+            return Proto::CODEC_TRANSPORT_PCM;
+        if (codecId == Proto::CODEC_TRANSPORT_OPUS)
+            return Proto::CODEC_TRANSPORT_OPUS;
+        return Proto::CODEC_TRANSPORT_CODEC2;
+    };
+
+    auto applyRxCodecConfig = [&codecRx,
+                               &suppressCodecBroadcast,
+                               &appliedRxCodecSender,
+                               &appliedRxCodecMode,
+                               &appliedRxCodecId](quint32 senderId,
+                                                   const RxCodecConfig& config,
+                                                   const QString& reason) {
+        if (senderId == 0)
+            return;
+        if (appliedRxCodecSender == senderId &&
+            appliedRxCodecMode == config.mode &&
+            appliedRxCodecId == config.codecId)
+        {
+            return;
+        }
+
+        logCodecStatus(QStringLiteral("RX codec_config apply sender=%1 mode=%2 codecId=%3 reason=%4")
+                           .arg(senderId)
+                           .arg(config.mode)
+                           .arg(config.codecId)
+                           .arg(reason));
+
+        suppressCodecBroadcast = true;
+        if (config.codecId == Proto::CODEC_TRANSPORT_OPUS)
+            codecRx.setCodecType(Codec2Wrapper::CodecTypeOpus);
+        else
+            codecRx.setCodecType(Codec2Wrapper::CodecTypeCodec2);
+        codecRx.setForcePcm(config.codecId == Proto::CODEC_TRANSPORT_PCM);
+        codecRx.setMode(config.mode);
+        suppressCodecBroadcast = false;
+
+        appliedRxCodecSender = senderId;
+        appliedRxCodecMode = config.mode;
+        appliedRxCodecId = config.codecId;
+
+        logCodecStatus(QStringLiteral("RX codec state mode=%1 codecId=%2 forcePcm=%3 codec2Active=%4 opusActive=%5")
+                           .arg(config.mode)
+                           .arg(config.codecId)
+                           .arg(codecRx.forcePcm() ? 1 : 0)
+                           .arg(codecRx.codec2Active() ? 1 : 0)
+                           .arg(codecRx.opusActive() ? 1 : 0));
+    };
+
     QObject::connect(&channelManager, &ChannelManager::talkerChanged,
-                     &appState, [&appState](quint32 talkerId) {
+                     &appState, [&appState,
+                                 &currentTalkerId,
+                                 &rxCodecConfigBySender,
+                                 &applyRxCodecConfig](quint32 talkerId) {
         appState.setTalkerId(talkerId);
+        currentTalkerId = talkerId;
+        if (talkerId == 0)
+            return;
+
+        const auto it = rxCodecConfigBySender.constFind(talkerId);
+        if (it == rxCodecConfigBySender.constEnd())
+        {
+            logCodecStatus(QStringLiteral("RX talker changed sender=%1 no cached codec_config")
+                               .arg(talkerId));
+            return;
+        }
+
+        applyRxCodecConfig(talkerId, it.value(), QStringLiteral("talker_changed"));
     });
 
     QObject::connect(&channelManager, &ChannelManager::talkerChanged,
@@ -522,47 +648,41 @@ int main(int argc, char *argv[])
     });
 
     QObject::connect(&channelManager, &ChannelManager::codecConfigReceived,
-                     &appState, [&codecRx,
-                                  &suppressCodecBroadcast,
-                                  &lastRxConfigSender,
-                                  &lastRxConfigMode,
-                                  &lastRxConfigCodecId]
+                     &appState, [&rxCodecConfigBySender,
+                                  &currentTalkerId,
+                                  &applyRxCodecConfig,
+                                  normalizeCodecId]
                                   (quint32 senderId, int mode, bool pcmOnly, int codecId) {
-        int normalizedCodecId = codecId;
-        if (pcmOnly || codecId == Proto::CODEC_TRANSPORT_PCM)
-            normalizedCodecId = Proto::CODEC_TRANSPORT_PCM;
-        else if (codecId != Proto::CODEC_TRANSPORT_CODEC2 &&
-                 codecId != Proto::CODEC_TRANSPORT_OPUS)
-            normalizedCodecId = Proto::CODEC_TRANSPORT_CODEC2;
+        const int normalizedCodecId = normalizeCodecId(codecId, pcmOnly);
+        const RxCodecConfig config{mode, normalizedCodecId};
+        const auto prev = rxCodecConfigBySender.constFind(senderId);
+        const bool unchanged = (prev != rxCodecConfigBySender.constEnd() &&
+                                prev->mode == config.mode &&
+                                prev->codecId == config.codecId);
+        if (!unchanged)
+            rxCodecConfigBySender.insert(senderId, config);
 
-        if (lastRxConfigSender == senderId &&
-            lastRxConfigMode == mode &&
-            lastRxConfigCodecId == normalizedCodecId)
-        {
-            return;
-        }
         logCodecStatus(QStringLiteral("RX codec_config recv sender=%1 mode=%2 codecId=%3 pcmOnly=%4")
                            .arg(senderId)
                            .arg(mode)
                            .arg(normalizedCodecId)
                            .arg(pcmOnly ? 1 : 0));
-        suppressCodecBroadcast = true;
-        if (normalizedCodecId == Proto::CODEC_TRANSPORT_OPUS)
-            codecRx.setCodecType(Codec2Wrapper::CodecTypeOpus);
-        else
-            codecRx.setCodecType(Codec2Wrapper::CodecTypeCodec2);
-        codecRx.setForcePcm(normalizedCodecId == Proto::CODEC_TRANSPORT_PCM);
-        codecRx.setMode(mode);
-        logCodecStatus(QStringLiteral("RX codec_config applied mode=%1 codecId=%2 forcePcm=%3 codec2Active=%4 opusActive=%5")
-                           .arg(mode)
-                           .arg(normalizedCodecId)
-                           .arg(codecRx.forcePcm() ? 1 : 0)
-                           .arg(codecRx.codec2Active() ? 1 : 0)
-                           .arg(codecRx.opusActive() ? 1 : 0));
-        suppressCodecBroadcast = false;
-        lastRxConfigSender = senderId;
-        lastRxConfigMode = mode;
-        lastRxConfigCodecId = normalizedCodecId;
+
+        if (senderId == 0)
+            return;
+
+        if (senderId != currentTalkerId)
+        {
+            if (!unchanged)
+            {
+                logCodecStatus(QStringLiteral("RX codec_config cached sender=%1 (ignored: currentTalker=%2)")
+                                   .arg(senderId)
+                                   .arg(currentTalkerId));
+            }
+            return;
+        }
+
+        applyRxCodecConfig(senderId, config, QStringLiteral("codec_config_from_talker"));
     });
     QObject::connect(&channelManager, &ChannelManager::serverTalkTimeoutConfigured,
                      &appState, [&appState](int timeoutSec) {
@@ -573,11 +693,18 @@ int main(int argc, char *argv[])
     QObject::connect(&channelManager, &ChannelManager::handshakeReceived,
                      &keyExchange, &KeyExchange::processHandshakePacket);
     QObject::connect(&channelManager, &ChannelManager::channelError,
-                     &appState, [&appState, &pttController, &txActive](const QString& message) {
+                     &appState, [&appState, &pttController, &txActive,
+                                 &rxCodecConfigBySender, &currentTalkerId,
+                                 &appliedRxCodecSender, &appliedRxCodecMode, &appliedRxCodecId](const QString& message) {
         txActive = false;
         appState.setLinkStatus(message);
         appState.setServerOnline(false);
         appState.setTalkerId(0);
+        rxCodecConfigBySender.clear();
+        currentTalkerId = 0;
+        appliedRxCodecSender = 0;
+        appliedRxCodecMode = -1;
+        appliedRxCodecId = -1;
         pttController.setTalkAllowed(false);
         pttController.setRxHoldActive(false);
     });
@@ -609,7 +736,9 @@ int main(int argc, char *argv[])
                      &appState,
                      [&appState, &pttController, &keyExchange, &cipher, &serverTimeout,
                        &applyCryptoPreference, &sendCodecConfig, &keepaliveTimer, &codecConfigTimer,
-                       &lastRxConfigSender, &lastRxConfigMode, &lastRxConfigCodecId,
+                       &rxCodecConfigBySender, &currentTalkerId,
+                       &appliedRxCodecSender, &appliedRxCodecMode, &appliedRxCodecId,
+                       &reconnectChannelId, &reconnectServerAddress, &reconnectServerPort, &reconnectPassword,
                        &currentServerAddress, &currentServerPort,
                        &updateAndroidBackgroundReceiveService, &txActive](quint32 channelId,
                                                                   const QString& address,
@@ -622,14 +751,20 @@ int main(int argc, char *argv[])
         appState.setTalkerId(0);
         appState.setTalkTimeoutSec(0);
         appState.setPttPressed(false);
-        lastRxConfigSender = 0;
-        lastRxConfigMode = -1;
-        lastRxConfigCodecId = -1;
+        rxCodecConfigBySender.clear();
+        currentTalkerId = 0;
+        appliedRxCodecSender = 0;
+        appliedRxCodecMode = -1;
+        appliedRxCodecId = -1;
         pttController.setTalkAllowed(false);
         pttController.setRxHoldActive(false);
 
         currentServerAddress = QHostAddress(address);
         currentServerPort = port;
+        reconnectChannelId = channelId;
+        reconnectServerAddress = address;
+        reconnectServerPort = port;
+        reconnectPassword = password;
         pttController.setTarget(currentServerAddress, currentServerPort);
         updateAndroidBackgroundReceiveService();
 
@@ -658,6 +793,9 @@ int main(int argc, char *argv[])
     QObject::connect(&channelManager, &ChannelManager::targetChanged,
                      &appState, [&channelManager, &pttController,
                                   &keepaliveTimer, &codecConfigTimer,
+                                  &rxCodecConfigBySender, &currentTalkerId,
+                                  &appliedRxCodecSender, &appliedRxCodecMode, &appliedRxCodecId,
+                                  &reconnectChannelId, &reconnectServerAddress, &reconnectServerPort, &reconnectPassword,
                                   &currentServerAddress, &currentServerPort,
                                   &updateAndroidBackgroundReceiveService]() {
         const QString address = channelManager.targetAddress();
@@ -665,9 +803,18 @@ int main(int argc, char *argv[])
         {
             currentServerAddress = QHostAddress();
             currentServerPort = 0;
+            reconnectChannelId = 0;
+            reconnectServerAddress.clear();
+            reconnectServerPort = 0;
+            reconnectPassword.clear();
             pttController.setTarget(QHostAddress(), 0);
             keepaliveTimer.stop();
             codecConfigTimer.stop();
+            rxCodecConfigBySender.clear();
+            currentTalkerId = 0;
+            appliedRxCodecSender = 0;
+            appliedRxCodecMode = -1;
+            appliedRxCodecId = -1;
             updateAndroidBackgroundReceiveService();
             return;
         }
@@ -691,11 +838,13 @@ int main(int argc, char *argv[])
     });
 
     QObject::connect(&serverTimeout, &QTimer::timeout,
-                     &appState, [&appState, &pttController, &txActive]() {
+                     &appState, [&appState, &pttController, &txActive,
+                                 &currentTalkerId]() {
         txActive = false;
         appState.setServerOnline(false);
         appState.setLinkStatus(QStringLiteral("No response"));
         appState.setTalkerId(0);
+        currentTalkerId = 0;
         pttController.setTalkAllowed(false);
         pttController.setRxHoldActive(false);
     });
@@ -774,6 +923,7 @@ int main(int argc, char *argv[])
                        .arg(codecRx.opusActive() ? 1 : 0));
 
     engine.rootContext()->setContextProperty("appState", &appState);
+    engine.rootContext()->setContextProperty("cryptoUtils", &cryptoUtils);
     engine.rootContext()->setContextProperty("licenseProvider", &licenseProvider);
     engine.rootContext()->setContextProperty("audioInput", &audioInput);
     engine.rootContext()->setContextProperty("pttController", &pttController);

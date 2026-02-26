@@ -110,7 +110,6 @@ private:
     bool m_fadeOutPending = false;
     QByteArray m_fadeOutFrame;
     int m_plcRemaining = 0;
-    int m_plcMaxFrames = 3;
     int m_pcmMissCount = 0;
     bool m_talkEnded = false;
     quint32 m_releaseTalkerId = 0;

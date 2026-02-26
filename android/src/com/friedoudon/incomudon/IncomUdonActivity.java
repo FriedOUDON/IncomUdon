@@ -5,6 +5,10 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -18,8 +22,13 @@ import org.qtproject.qt.android.bindings.QtActivity;
 
 public class IncomUdonActivity extends QtActivity {
     public static native void onHeadsetPttChanged(boolean pressed);
+    public static native void onNetworkAvailabilityChanged(boolean available);
     private static IncomUdonActivity sInstance;
     private AudioManager mAudioManager;
+    private ConnectivityManager mConnectivityManager;
+    private ConnectivityManager.NetworkCallback mNetworkCallback;
+    private boolean mNetworkCallbackRegistered = false;
+    private boolean mLastNetworkAvailable = true;
     private boolean mPttRouteEnabled = false;
     private boolean mPreferCommunicationMode = false;
     private ToneGenerator mToneVoiceCall;
@@ -30,11 +39,15 @@ public class IncomUdonActivity extends QtActivity {
         super.onCreate(savedInstanceState);
         sInstance = this;
         mAudioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        mConnectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
         forceMediaVolumeStream();
+        registerNetworkCallback();
+        notifyNetworkAvailabilityChanged(isNetworkAvailable());
     }
 
     @Override
     public void onDestroy() {
+        unregisterNetworkCallback();
         stopKeepAliveService();
         mPreferCommunicationMode = false;
         applyPttAudioRoute(false, true);
@@ -157,6 +170,99 @@ public class IncomUdonActivity extends QtActivity {
         } catch (Exception ignored) {
         }
         return null;
+    }
+
+    private void registerNetworkCallback() {
+        if (mConnectivityManager == null || mNetworkCallbackRegistered) {
+            return;
+        }
+
+        mNetworkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                // Force notify to detect interface switches even when availability
+                // stays true (e.g. Wi-Fi <-> mobile handover).
+                notifyNetworkAvailabilityChanged(true, true);
+            }
+
+            @Override
+            public void onLost(Network network) {
+                notifyNetworkAvailabilityChanged(isNetworkAvailable(), false);
+            }
+
+            @Override
+            public void onUnavailable() {
+                notifyNetworkAvailabilityChanged(false, false);
+            }
+        };
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                mConnectivityManager.registerDefaultNetworkCallback(mNetworkCallback);
+            } else {
+                NetworkRequest request = new NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build();
+                mConnectivityManager.registerNetworkCallback(request, mNetworkCallback);
+            }
+            mNetworkCallbackRegistered = true;
+        } catch (Exception ignored) {
+            mNetworkCallback = null;
+            mNetworkCallbackRegistered = false;
+        }
+    }
+
+    private void unregisterNetworkCallback() {
+        if (mConnectivityManager == null || !mNetworkCallbackRegistered || mNetworkCallback == null) {
+            return;
+        }
+        try {
+            mConnectivityManager.unregisterNetworkCallback(mNetworkCallback);
+        } catch (Exception ignored) {
+        }
+        mNetworkCallback = null;
+        mNetworkCallbackRegistered = false;
+    }
+
+    private boolean isNetworkAvailable() {
+        if (mConnectivityManager == null) {
+            return false;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                Network network = mConnectivityManager.getActiveNetwork();
+                if (network == null) {
+                    return false;
+                }
+                NetworkCapabilities caps = mConnectivityManager.getNetworkCapabilities(network);
+                return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+
+        try {
+            android.net.NetworkInfo info = mConnectivityManager.getActiveNetworkInfo();
+            return info != null && info.isConnected();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void notifyNetworkAvailabilityChanged(boolean available) {
+        notifyNetworkAvailabilityChanged(available, false);
+    }
+
+    private void notifyNetworkAvailabilityChanged(boolean available, boolean force) {
+        if (!force && mLastNetworkAvailable == available) {
+            return;
+        }
+        mLastNetworkAvailable = available;
+        try {
+            onNetworkAvailabilityChanged(available);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
     }
 
     private void applyPreferCommunicationMode(boolean enabled) {

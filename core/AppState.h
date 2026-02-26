@@ -252,6 +252,8 @@ private:
     quint32 m_senderId = 0;
     int m_codecSelection = CodecPcm;
     int m_codecBitrate = 1600;
+    int m_codec2Bitrate = 1600;
+    int m_opusBitrate = 6000;
     bool m_forcePcm = true;
     bool m_fecEnabled = true;
     bool m_qosEnabled = true;

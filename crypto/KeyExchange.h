@@ -45,6 +45,7 @@ signals:
 
 private:
     QByteArray derivePasswordKey() const;
+    QByteArray normalizePasswordHash(const QString& passwordOrHash) const;
 
     bool m_ready = false;
     CryptoMode m_cryptoMode =
@@ -55,6 +56,6 @@ private:
 #endif
     CryptoMode m_preferredMode = m_cryptoMode;
     quint32 m_channelId = 0;
-    QString m_password;
+    QByteArray m_passwordHash;
     QByteArray m_passwordKey;
 };

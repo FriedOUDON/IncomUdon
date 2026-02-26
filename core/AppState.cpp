@@ -201,6 +201,7 @@ int AppState::codecSelection() const
 }
 
 static int normalizeCodecBitrateForSelection(int bitrate, int selection);
+static int selectRememberedBitrateForSelection(int codec2Bitrate, int opusBitrate, int selection);
 
 void AppState::setCodecSelection(int selection)
 {
@@ -216,7 +217,8 @@ void AppState::setCodecSelection(int selection)
     const bool newForcePcm = (normalized == CodecPcm);
     const bool selectionChanged = (m_codecSelection != normalized);
     const bool forceChanged = (m_forcePcm != newForcePcm);
-    const int normalizedBitrate = normalizeCodecBitrateForSelection(m_codecBitrate, normalized);
+    const int normalizedBitrate = selectRememberedBitrateForSelection(
+        m_codec2Bitrate, m_opusBitrate, normalized);
     const bool bitrateChanged = (m_codecBitrate != normalizedBitrate);
     if (!selectionChanged && !forceChanged && !bitrateChanged)
         return;
@@ -224,6 +226,10 @@ void AppState::setCodecSelection(int selection)
     m_codecSelection = normalized;
     m_forcePcm = newForcePcm;
     m_codecBitrate = normalizedBitrate;
+    if (normalized == CodecOpus)
+        m_opusBitrate = normalizedBitrate;
+    else
+        m_codec2Bitrate = normalizedBitrate;
     if (selectionChanged)
         emit codecSelectionChanged();
     if (forceChanged)
@@ -275,9 +281,21 @@ static int normalizeCodecBitrateForSelection(int bitrate, int selection)
     return normalizeCodec2Bitrate(bitrate);
 }
 
+static int selectRememberedBitrateForSelection(int codec2Bitrate, int opusBitrate, int selection)
+{
+    if (selection == AppState::CodecOpus)
+        return normalizeCodecBitrateForSelection(opusBitrate, selection);
+    return normalizeCodecBitrateForSelection(codec2Bitrate, selection);
+}
+
 void AppState::setCodecBitrate(int bitrate)
 {
     const int normalized = normalizeCodecBitrateForSelection(bitrate, m_codecSelection);
+    if (m_codecSelection == CodecOpus)
+        m_opusBitrate = normalized;
+    else
+        m_codec2Bitrate = normalized;
+
     if (m_codecBitrate == normalized)
         return;
 
@@ -308,7 +326,8 @@ void AppState::setForcePcm(bool force)
         newSelection = CodecCodec2;
 #endif
 
-    const int normalizedBitrate = normalizeCodecBitrateForSelection(m_codecBitrate, newSelection);
+    const int normalizedBitrate = selectRememberedBitrateForSelection(
+        m_codec2Bitrate, m_opusBitrate, newSelection);
     const bool bitrateChanged = (m_codecBitrate != normalizedBitrate);
     if (m_forcePcm == normalized &&
         m_codecSelection == newSelection &&
@@ -319,6 +338,10 @@ void AppState::setForcePcm(bool force)
     m_forcePcm = normalized;
     m_codecSelection = newSelection;
     m_codecBitrate = normalizedBitrate;
+    if (newSelection == CodecOpus)
+        m_opusBitrate = normalizedBitrate;
+    else
+        m_codec2Bitrate = normalizedBitrate;
     emit forcePcmChanged();
     if (selectionChanged)
         emit codecSelectionChanged();

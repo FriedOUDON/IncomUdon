@@ -36,6 +36,24 @@ QByteArray randomNonceBase()
         out[i] = static_cast<char>((value >> ((7 - i) * 8)) & 0xFF);
     return out;
 }
+
+bool isSha256HexString(const QString& text)
+{
+    if (text.size() != 64)
+        return false;
+
+    for (const QChar c : text)
+    {
+        const ushort u = c.unicode();
+        const bool isHex = (u >= u'0' && u <= u'9') ||
+                           (u >= u'a' && u <= u'f') ||
+                           (u >= u'A' && u <= u'F');
+        if (!isHex)
+            return false;
+    }
+
+    return true;
+}
 }
 
 KeyExchange::KeyExchange(QObject* parent)
@@ -59,10 +77,11 @@ void KeyExchange::setChannelId(quint32 channelId)
 
 void KeyExchange::setPassword(const QString& password)
 {
-    if (m_password == password)
+    const QByteArray normalizedHash = normalizePasswordHash(password);
+    if (m_passwordHash == normalizedHash)
         return;
 
-    m_password = password;
+    m_passwordHash = normalizedHash;
     m_passwordKey.clear();
 }
 
@@ -210,14 +229,29 @@ void KeyExchange::processHandshakePacket(const QByteArray& packet)
 
 QByteArray KeyExchange::derivePasswordKey() const
 {
+    if (m_passwordHash.isEmpty())
+        return QByteArray();
+
     QByteArray salt;
     salt.append(static_cast<char>((m_channelId >> 24) & 0xFF));
     salt.append(static_cast<char>((m_channelId >> 16) & 0xFF));
     salt.append(static_cast<char>((m_channelId >> 8) & 0xFF));
     salt.append(static_cast<char>(m_channelId & 0xFF));
 
-    QByteArray input = m_password.toUtf8();
+    QByteArray input = m_passwordHash;
     input.append(salt);
 
     return QCryptographicHash::hash(input, QCryptographicHash::Sha256);
+}
+
+QByteArray KeyExchange::normalizePasswordHash(const QString& passwordOrHash) const
+{
+    if (passwordOrHash.isEmpty())
+        return QByteArray();
+
+    if (isSha256HexString(passwordOrHash))
+        return QByteArray::fromHex(passwordOrHash.toLatin1());
+
+    return QCryptographicHash::hash(passwordOrHash.toUtf8(),
+                                    QCryptographicHash::Sha256);
 }

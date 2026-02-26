@@ -20,12 +20,14 @@ public:
 
 signals:
     void headsetButtonChanged(bool pressed);
+    void networkAvailabilityChanged(bool available);
 
 private:
     explicit AndroidPttBridge(QObject* parent = nullptr);
 
 #ifdef Q_OS_ANDROID
     static void nativeOnHeadsetPttChanged(JNIEnv* env, jclass clazz, jboolean pressed);
+    static void nativeOnNetworkAvailabilityChanged(JNIEnv* env, jclass clazz, jboolean available);
 #endif
 
     bool m_initialized = false;
