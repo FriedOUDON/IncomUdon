@@ -20,6 +20,7 @@ Window {
         property string serverPort: "50000"
         property string channelId: "100"
         property string password: ""
+        property string passwordEditText: ""
         property var codec2ModeOptions: [450, 700, 1600, 2400, 3200]
         property var opusBpsOptions: [6000, 8000, 12000, 16000, 20000, 64000, 96000, 128000]
         property url defaultPttOnSoundUrl: "qrc:/qt/qml/IncomUdon/assets/sfx/ptt_on.wav"
@@ -160,14 +161,28 @@ Window {
             return text.toString()
         }
 
+        function effectivePasswordHash() {
+            var typed = (root.passwordEditText || "").toString()
+            if (typed.length > 0)
+                return root.normalizedPasswordHash(typed)
+            return (root.password || "").toString()
+        }
+
+        function commitPasswordInputHash() {
+            var typed = (root.passwordEditText || "").toString()
+            if (typed.length === 0)
+                return
+            root.password = root.normalizedPasswordHash(typed)
+            root.passwordEditText = ""
+        }
+
         function tryAutoConnectOnStartup() {
             if (startupAutoConnectDone)
                 return
             startupAutoConnectDone = true
 
             var addr = (root.serverAddress || "").toString().trim()
-            var passwordText = (root.password || "").toString()
-            var passwordHash = root.normalizedPasswordHash(passwordText)
+            var passwordHash = root.effectivePasswordHash()
             var port = parseInt(root.serverPort)
             var channel = parseInt(root.channelId)
 
@@ -367,6 +382,7 @@ Window {
                 root.password = normalizedStoredPassword
                 persisted.password = normalizedStoredPassword
             }
+            root.passwordEditText = ""
 
             var initialCodecSelection = root.clampInt(
                         persisted.codecSelection,
@@ -1266,14 +1282,32 @@ Window {
                                 border.width: 1
 
                                 TextInput {
+                                    id: passwordInput
                                     anchors.fill: parent
                                     anchors.margins: 6
                                     color: "#cfd8dc"
-                                    text: root.password
+                                    text: root.passwordEditText
                                     font.pixelSize: Math.round(parent.height * 0.35)
                                     verticalAlignment: TextInput.AlignVCenter
                                     echoMode: TextInput.Password
-                                    onTextChanged: root.password = text
+                                    onTextChanged: root.passwordEditText = text
+                                    onEditingFinished: root.commitPasswordInputHash()
+                                    onActiveFocusChanged: {
+                                        if (activeFocus)
+                                            selectAll()
+                                    }
+                                }
+
+                                Text {
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    verticalAlignment: Text.AlignVCenter
+                                    color: "#607d8b"
+                                    font.pixelSize: Math.round(parent.height * 0.30)
+                                    text: "(変更無し)"
+                                    visible: !passwordInput.activeFocus &&
+                                             passwordInput.text.length === 0 &&
+                                             root.password.length > 0
                                 }
                             }
 
@@ -1299,11 +1333,18 @@ Window {
 
                                 TapHandler {
                                     enabled: connectButton.inputValid
-                                    onTapped: channelManager.connectToServer(
-                                                  parseInt(root.channelId),
-                                                  root.serverAddress,
-                                                  parseInt(root.serverPort),
-                                                  root.normalizedPasswordHash(root.password))
+                                    onTapped: {
+                                        passwordInput.focus = false
+                                        var passwordHash = root.effectivePasswordHash()
+                                        if (passwordHash.length === 0)
+                                            return
+                                        channelManager.connectToServer(
+                                                    parseInt(root.channelId),
+                                                    root.serverAddress,
+                                                    parseInt(root.serverPort),
+                                                    passwordHash)
+                                        root.commitPasswordInputHash()
+                                    }
                                 }
                             }
 
