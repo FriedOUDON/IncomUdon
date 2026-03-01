@@ -47,6 +47,9 @@ static void logCodecStatus(const QString& message)
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("FriedOudon"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("friedoudon.com"));
+    QCoreApplication::setApplicationName(QStringLiteral("IncomUdon"));
 
     QTranslator appTranslator;
     if (appTranslator.load(QLocale::system(),
