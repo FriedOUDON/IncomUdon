@@ -9,6 +9,7 @@ permissions:
 
 env:
   QT_VERSION: "6.10.2"
+  QT_MODULES: "qtmultimedia"
   CMAKE_BUILD_TYPE: "Release"
   CMAKE_COMMON_ARGS: >-
     -DINCOMUDON_CODEC2_RUNTIME_LOADER=ON
@@ -58,13 +59,11 @@ jobs:
           version: ${{ env.QT_VERSION }}
           target: desktop
           arch: ${{ matrix.qt_arch }}
+          modules: ${{ env.QT_MODULES }}
           cache: true
 
       - name: Configure
-        run: |
-          qt-cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
-            ${{ env.CMAKE_COMMON_ARGS }}
+        run: qt-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ env.CMAKE_COMMON_ARGS }}
 
       - name: Build
         run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
@@ -87,20 +86,13 @@ jobs:
       - name: Setup Ninja
         run: brew install ninja
 
-      - name: Install Qt (desktop host tools)
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          target: desktop
-          arch: clang_64
-          cache: true
-
       - name: Install Qt (iOS)
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           target: ios
           arch: ios
+          modules: ${{ env.QT_MODULES }}
           cache: true
 
       - name: Configure
@@ -154,20 +146,13 @@ jobs:
       - name: Setup Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Install Qt (desktop host tools)
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          target: desktop
-          arch: gcc_64
-          cache: true
-
       - name: Install Qt (Android)
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
           target: android
           arch: android_arm64_v8a
+          modules: ${{ env.QT_MODULES }}
           cache: true
 
       - name: Configure
