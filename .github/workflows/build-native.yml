@@ -31,7 +31,7 @@ jobs:
           - name: windows
             os: windows-latest
             qt_arch: win64_msvc2022_64
-            artifact: build/appIncomUdon.exe
+            artifact: dist/windows/**
           - name: macos
             os: macos-latest
             qt_arch: clang_64
@@ -67,6 +67,42 @@ jobs:
 
       - name: Build
         run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
+
+      - name: Deploy Runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $deployDir = Join-Path $PWD "dist/windows"
+          New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
+
+          $exe = Join-Path $PWD "build/appIncomUdon.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Executable not found: $exe"
+          }
+          Copy-Item $exe (Join-Path $deployDir "appIncomUdon.exe") -Force
+
+          windeployqt.exe --release --qmldir "$PWD/ui" --compiler-runtime (Join-Path $deployDir "appIncomUdon.exe")
+
+          # OpenSSL DLLs are not always deployed by windeployqt.
+          $opensslDlls = @("libcrypto-3-x64.dll", "libssl-3-x64.dll")
+          $pathDirs = $env:PATH -split ';'
+          foreach ($dll in $opensslDlls) {
+            $found = $null
+            foreach ($d in $pathDirs) {
+              if ([string]::IsNullOrWhiteSpace($d)) { continue }
+              $cand = Join-Path $d $dll
+              if (Test-Path $cand) {
+                $found = $cand
+                break
+              }
+            }
+            if ($found) {
+              Copy-Item $found $deployDir -Force
+              Write-Host "Copied $dll from $found"
+            } else {
+              Write-Warning "$dll not found in PATH"
+            }
+          }
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
