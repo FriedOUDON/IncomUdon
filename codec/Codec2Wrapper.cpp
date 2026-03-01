@@ -1480,12 +1480,12 @@ void Codec2Wrapper::updateCodec()
                 // that are known to crash on some third-party builds.
                 if (!genericProbeOk || !decodeProbeOk)
                 {
-                    const auto resolveCodec2Symbol = [&](const char* name) -> void* {
+                    const auto resolveCodec2Symbol = [&](const char* name) -> QFunctionPointer {
                         if (!name || name[0] == '\0')
                             return nullptr;
 #if defined(Q_OS_ANDROID)
                         if (m_codec2DlHandle)
-                            return dlsym(m_codec2DlHandle, name);
+                            return reinterpret_cast<QFunctionPointer>(dlsym(m_codec2DlHandle, name));
                         return nullptr;
 #else
                         if (m_codec2Library)
