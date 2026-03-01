@@ -157,8 +157,17 @@ private:
     Codec2DestroyFn m_codec2Destroy = nullptr;
     Codec2EncodeFn m_codec2Encode = nullptr;
     Codec2DecodeFn m_codec2Decode = nullptr;
+    Codec2EncodeFn m_codec2EncodeActive = nullptr;
+    Codec2DecodeFn m_codec2DecodeActive = nullptr;
+    typedef int (*Codec2AbiVersionFn)();
+
     Codec2BitsPerFrameFn m_codec2BitsPerFrame = nullptr;
     Codec2SamplesPerFrameFn m_codec2SamplesPerFrame = nullptr;
+    Codec2AbiVersionFn m_codec2AbiVersion = nullptr;
+    QString m_codec2KnownBadPath;
+#if defined(Q_OS_ANDROID)
+    void* m_codec2DlHandle = nullptr;
+#endif
 #endif
 
 #ifdef INCOMUDON_USE_OPUS

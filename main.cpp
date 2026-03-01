@@ -65,9 +65,9 @@ int main(int argc, char *argv[])
     AudioInput audioInput;
     AudioOutput audioOutput;
     Codec2Wrapper codecTx;
-    // Use a single codec2 wrapper instance for both TX/RX to avoid
-    // creating a second runtime codec2 context on Android.
-    Codec2Wrapper& codecRx = codecTx;
+    // TX/RX must use independent codec instances.
+    // Sharing one CODEC2 state between encode/decode can corrupt stream state.
+    Codec2Wrapper codecRx;
     KeyExchange keyExchange;
     AeadCipher cipher;
     Packetizer packetizer;
