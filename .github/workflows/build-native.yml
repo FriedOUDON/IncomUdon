@@ -1,0 +1,195 @@
+name: Native Multi-Platform Build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: "6.10.2"
+  CMAKE_BUILD_TYPE: "Release"
+  CMAKE_COMMON_ARGS: >-
+    -DINCOMUDON_CODEC2_RUNTIME_LOADER=ON
+    -DUSE_CODEC2_ANDROID_PREBUILT=OFF
+    -DUSE_CODEC2_WINDOWS_PREBUILT=OFF
+    -DUSE_OPENSSL_ANDROID_PREBUILT=OFF
+    -DUSE_OPENSSL_WINDOWS_PREBUILT=OFF
+    -DUSE_OPUS_ANDROID_PREBUILT=OFF
+    -DUSE_OPUS_WINDOWS_PREBUILT=OFF
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows
+            os: windows-latest
+            qt_arch: win64_msvc2022_64
+            artifact: build/appIncomUdon.exe
+          - name: macos
+            os: macos-latest
+            qt_arch: clang_64
+            artifact: build/appIncomUdon.app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Setup Ninja (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: desktop
+          arch: ${{ matrix.qt_arch }}
+          cache: true
+
+      - name: Configure
+        run: |
+          qt-cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            ${{ env.CMAKE_COMMON_ARGS }}
+
+      - name: Build
+        run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: incomudon-${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+
+  ios:
+    name: iOS (Simulator)
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ninja
+        run: brew install ninja
+
+      - name: Install Qt (desktop host tools)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: desktop
+          arch: clang_64
+          cache: true
+
+      - name: Install Qt (iOS)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: ios
+          arch: ios
+          cache: true
+
+      - name: Configure
+        run: |
+          qt-cmake -S . -B build-ios -G Xcode \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            ${{ env.CMAKE_COMMON_ARGS }}
+
+      - name: Build
+        run: cmake --build build-ios --config ${{ env.CMAKE_BUILD_TYPE }} --target appIncomUdon --parallel
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: incomudon-ios-simulator
+          path: build-ios/**/*.app
+          if-no-files-found: error
+
+  android:
+    name: Android (arm64-v8a)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Components
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;27.2.12479018"
+
+      - name: Set Android NDK env
+        run: |
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Setup Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Install Qt (desktop host tools)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: desktop
+          arch: gcc_64
+          cache: true
+
+      - name: Install Qt (Android)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: android
+          arch: android_arm64_v8a
+          cache: true
+
+      - name: Configure
+        run: |
+          qt-cmake -S . -B build-android -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-23 \
+            ${{ env.CMAKE_COMMON_ARGS }}
+
+      - name: Build
+        run: cmake --build build-android --config ${{ env.CMAKE_BUILD_TYPE }} --target appIncomUdon --parallel
+
+      - name: Build APK (best effort)
+        run: cmake --build build-android --config ${{ env.CMAKE_BUILD_TYPE }} --target apk --parallel || true
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: incomudon-android-arm64-v8a
+          path: |
+            build-android/**/*.apk
+            build-android/**/*.aab
+            build-android/**/*.so
+          if-no-files-found: error

@@ -6,6 +6,7 @@ import QtMultimedia
 import QtCore
 
 Window {
+    id: mainWindow
     width: 360
     height: 640
     visible: true
@@ -14,7 +15,48 @@ Window {
     Rectangle {
         id: root
         anchors.fill: parent
+        focus: true
         color: "#0f141a"
+        property bool keyboardSpacePttActive: false
+
+        Keys.onPressed: function(event) {
+            if (event.isAutoRepeat)
+                return
+
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                if (root.triggerConnect())
+                    event.accepted = true
+                return
+            }
+
+            if (event.key === Qt.Key_Space) {
+                if (root.isTextInputFocused())
+                    return
+                if (root.setPttFromKeyboard(true)) {
+                    root.keyboardSpacePttActive = true
+                    event.accepted = true
+                }
+            }
+        }
+
+        Keys.onReleased: function(event) {
+            if (event.isAutoRepeat)
+                return
+            if (event.key !== Qt.Key_Space)
+                return
+            if (!root.keyboardSpacePttActive)
+                return
+            root.keyboardSpacePttActive = false
+            if (root.setPttFromKeyboard(false))
+                event.accepted = true
+        }
+
+        onVisibleChanged: {
+            if (!visible && root.keyboardSpacePttActive) {
+                root.keyboardSpacePttActive = false
+                root.setPttFromKeyboard(false)
+            }
+        }
 
         property string serverAddress: ""
         property string serverPort: "50000"
@@ -54,6 +96,7 @@ Window {
         property int txTimeoutRemainingSec: 0
         property double lastCueRecoveryMs: 0
         property bool suppressForcePcmPersistence: false
+        property var passwordInputItem: null
         property var cueAudioDevice: cueMediaDevices.defaultAudioOutput
         property string codec2DownloadUrl: "https://github.com/FriedOUDON/libcodec2/releases/tag/v1.0.2"
         property string licensesText: ""
@@ -227,6 +270,53 @@ Window {
                 return
 
             channelManager.connectToServer(channel, addr, port, passwordHash)
+        }
+
+        function hasValidConnectInputs() {
+            var addr = (root.serverAddress || "").toString().trim()
+            var port = parseInt(root.serverPort)
+            var channel = parseInt(root.channelId)
+            return addr.length > 0 &&
+                    isFinite(port) && port > 0 && port <= 65535 &&
+                    isFinite(channel) && channel > 0
+        }
+
+        function triggerConnect() {
+            if (!hasValidConnectInputs())
+                return false
+            var passwordHash = root.effectivePasswordHash()
+            if (passwordHash.length === 0)
+                return false
+            if (root.passwordInputItem)
+                root.passwordInputItem.focus = false
+            channelManager.connectToServer(
+                        parseInt(root.channelId),
+                        root.serverAddress,
+                        parseInt(root.serverPort),
+                        passwordHash)
+            root.commitPasswordInputHash()
+            return true
+        }
+
+        function isTextInputFocused() {
+            var item = mainWindow.activeFocusItem
+            while (item) {
+                if (item.selectAll !== undefined &&
+                        item.cursorPosition !== undefined &&
+                        item.text !== undefined)
+                    return true
+                item = item.parent
+            }
+            return false
+        }
+
+        function setPttFromKeyboard(pressed) {
+            if (!appState.serverOnline)
+                return false
+            if (appState.pttPressed === pressed)
+                return true
+            appState.pttPressed = pressed
+            return true
         }
 
         function startTxTimeoutCountdown() {
@@ -1337,6 +1427,11 @@ Window {
                                         if (activeFocus)
                                             selectAll()
                                     }
+                                    Component.onCompleted: root.passwordInputItem = passwordInput
+                                    Component.onDestruction: {
+                                        if (root.passwordInputItem === passwordInput)
+                                            root.passwordInputItem = null
+                                    }
                                 }
 
                                 Text {
@@ -1357,9 +1452,7 @@ Window {
                                 width: parent.width
                                 height: 52
                                 radius: 8
-                                property bool inputValid: Number(root.serverPort) > 0 &&
-                                                          Number(root.channelId) > 0 &&
-                                                          root.serverAddress.length > 0
+                                property bool inputValid: root.hasValidConnectInputs()
                                 color: inputValid ? "#4db6ac" : "#455a64"
                                 opacity: inputValid ? 1.0 : 0.6
                                 border.color: "#263238"
@@ -1374,18 +1467,7 @@ Window {
 
                                 TapHandler {
                                     enabled: connectButton.inputValid
-                                    onTapped: {
-                                        passwordInput.focus = false
-                                        var passwordHash = root.effectivePasswordHash()
-                                        if (passwordHash.length === 0)
-                                            return
-                                        channelManager.connectToServer(
-                                                    parseInt(root.channelId),
-                                                    root.serverAddress,
-                                                    parseInt(root.serverPort),
-                                                    passwordHash)
-                                        root.commitPasswordInputHash()
-                                    }
+                                    onTapped: root.triggerConnect()
                                 }
                             }
 
