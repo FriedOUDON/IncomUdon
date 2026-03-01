@@ -155,7 +155,6 @@ jobs:
   ios-device:
     name: iOS (Device, Signed IPA)
     runs-on: macos-14
-    if: ${{ secrets.IOS_CERT_P12_BASE64 != '' && secrets.IOS_CERT_PASSWORD != '' && secrets.IOS_PROVISION_PROFILE_BASE64 != '' && secrets.IOS_TEAM_ID != '' && secrets.IOS_BUNDLE_ID != '' }}
     env:
       IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
       IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
@@ -169,10 +168,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check iOS Signing Secrets
+        id: ios_signing_guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in IOS_CERT_P12_BASE64 IOS_CERT_PASSWORD IOS_PROVISION_PROFILE_BASE64 IOS_TEAM_ID IOS_BUNDLE_ID; do
+            if [ -z "${!key:-}" ]; then
+              echo "missing: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "iOS device signing secrets are missing; skipping signed IPA build."
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Ninja
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         run: brew install ninja
 
       - name: Install Qt (iOS)
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
@@ -182,6 +202,7 @@ jobs:
           cache: true
 
       - name: Install Signing Certificate and Provisioning Profile
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -212,6 +233,7 @@ jobs:
           echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
 
       - name: Configure
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -228,6 +250,7 @@ jobs:
             ${{ env.CMAKE_COMMON_ARGS }}
 
       - name: Archive App
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -245,6 +268,7 @@ jobs:
             archive
 
       - name: Export IPA
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -276,6 +300,7 @@ jobs:
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
       - name: Upload Artifact
+        if: steps.ios_signing_guard.outputs.should_build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: incomudon-ios-device
