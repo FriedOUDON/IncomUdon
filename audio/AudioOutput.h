@@ -58,6 +58,7 @@ private:
     void ensureStarted();
     void onKeepAliveTick();
     void onAudioOutputsChanged();
+    void onDevicePollTick();
     void flushPending();
     void trimPending();
     void refreshOutputDevices();
@@ -71,6 +72,7 @@ private:
     QAudioFormat m_deviceFormat;
     AudioResampler m_resampler;
     QTimer m_keepAliveTimer;
+    QTimer m_devicePollTimer;
     QElapsedTimer m_lastWrite;
     int m_keepAliveMs = 60;
     int m_keepAliveBytes = 0;

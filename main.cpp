@@ -195,6 +195,79 @@ int main(int argc, char *argv[])
         const bool preferCommunicationMode = isLikelyBluetoothInputName(selectedName);
         androidPttBridge.setPreferCommunicationMode(preferCommunicationMode);
     };
+    auto isLikelyBluetoothOutputName = [](const QString& name) {
+        const QString n = name.toLower();
+        return n.contains(QStringLiteral("bluetooth")) ||
+               n.contains(QStringLiteral("ble")) ||
+               n.contains(QStringLiteral("headset")) ||
+               n.contains(QStringLiteral("hands-free")) ||
+               n.contains(QStringLiteral("wireless"));
+    };
+    auto isLikelyUsbOutputName = [](const QString& name) {
+        const QString n = name.toLower();
+        return n.contains(QStringLiteral("usb")) ||
+               n.contains(QStringLiteral("dac")) ||
+               n.contains(QStringLiteral("audioquest")) ||
+               n.contains(QStringLiteral("fiio")) ||
+               n.contains(QStringLiteral("hiby"));
+    };
+    auto isLikelyEarpieceName = [](const QString& name) {
+        const QString n = name.toLower();
+        return n.contains(QStringLiteral("earpiece")) ||
+               n.contains(QStringLiteral("receiver")) ||
+               n.contains(QStringLiteral("handset"));
+    };
+    auto isLikelySpeakerName = [](const QString& name) {
+        const QString n = name.toLower();
+        return n.contains(QStringLiteral("speaker")) ||
+               n.contains(QStringLiteral("loudspeaker"));
+    };
+    auto isLikelyWiredOutputName = [](const QString& name) {
+        const QString n = name.toLower();
+        return n.contains(QStringLiteral("headphone")) ||
+               n.contains(QStringLiteral("wired")) ||
+               n.contains(QStringLiteral("line out")) ||
+               n.contains(QStringLiteral("line-out"));
+    };
+    auto updateAndroidPreferredOutputRoute =
+        [&audioOutput, &androidPttBridge,
+         isLikelyBluetoothOutputName,
+         isLikelyUsbOutputName,
+         isLikelyEarpieceName,
+         isLikelySpeakerName,
+         isLikelyWiredOutputName]() {
+        // Must match IncomUdonActivity OUTPUT_ROUTE_* constants.
+        constexpr int kRouteAuto = 0;
+        constexpr int kRouteSpeaker = 1;
+        constexpr int kRouteEarpiece = 2;
+        constexpr int kRouteBluetooth = 3;
+        constexpr int kRouteUsb = 4;
+        constexpr int kRouteWired = 5;
+
+        int route = kRouteAuto;
+        const QString selectedId = audioOutput.selectedOutputDeviceId();
+        if (!selectedId.isEmpty())
+        {
+            const QStringList ids = audioOutput.outputDeviceIds();
+            const QStringList names = audioOutput.outputDeviceNames();
+            const int idx = ids.indexOf(selectedId);
+            if (idx >= 0 && idx < names.size())
+            {
+                const QString name = names.at(idx);
+                if (isLikelyEarpieceName(name))
+                    route = kRouteEarpiece;
+                else if (isLikelyUsbOutputName(name))
+                    route = kRouteUsb;
+                else if (isLikelyBluetoothOutputName(name))
+                    route = kRouteBluetooth;
+                else if (isLikelyWiredOutputName(name))
+                    route = kRouteWired;
+                else if (isLikelySpeakerName(name))
+                    route = kRouteSpeaker;
+            }
+        }
+        androidPttBridge.setPreferredOutputRoute(route);
+    };
     QObject::connect(&audioInput, &AudioInput::selectedInputDeviceIdChanged,
                      &appState, [&updateAndroidCommunicationModePreference]() {
         updateAndroidCommunicationModePreference();
@@ -204,6 +277,15 @@ int main(int argc, char *argv[])
         updateAndroidCommunicationModePreference();
     });
     updateAndroidCommunicationModePreference();
+    QObject::connect(&audioOutput, &AudioOutput::selectedOutputDeviceIdChanged,
+                     &appState, [&updateAndroidPreferredOutputRoute]() {
+        updateAndroidPreferredOutputRoute();
+    });
+    QObject::connect(&audioOutput, &AudioOutput::outputDevicesChanged,
+                     &appState, [&updateAndroidPreferredOutputRoute]() {
+        updateAndroidPreferredOutputRoute();
+    });
+    updateAndroidPreferredOutputRoute();
     QElapsedTimer pttPressElapsed;
     static constexpr int kPttOnCueProtectMs = 260;
     QTimer pttRouteEnableTimer;

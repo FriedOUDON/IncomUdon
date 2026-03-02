@@ -86,6 +86,22 @@ void AndroidPttBridge::setPreferCommunicationMode(bool enabled)
 #endif
 }
 
+void AndroidPttBridge::setPreferredOutputRoute(int route)
+{
+#ifdef Q_OS_ANDROID
+    if (!m_initialized)
+        initialize();
+
+    QJniObject::callStaticMethod<void>(
+        "com/friedoudon/incomudon/IncomUdonActivity",
+        "setPreferredOutputRoute",
+        "(I)V",
+        static_cast<jint>(route));
+#else
+    Q_UNUSED(route)
+#endif
+}
+
 void AndroidPttBridge::playCueTone(int cueId)
 {
 #ifdef Q_OS_ANDROID

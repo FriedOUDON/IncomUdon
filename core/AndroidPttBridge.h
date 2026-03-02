@@ -16,6 +16,7 @@ public:
     bool initialize();
     void setPttAudioRouteEnabled(bool enabled);
     void setPreferCommunicationMode(bool enabled);
+    void setPreferredOutputRoute(int route);
     Q_INVOKABLE void playCueTone(int cueId);
 
 signals:

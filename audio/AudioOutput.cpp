@@ -159,6 +159,13 @@ AudioOutput::AudioOutput(QObject* parent)
     m_keepAliveTimer.setInterval(m_keepAliveMs);
     connect(&m_keepAliveTimer, &QTimer::timeout,
             this, &AudioOutput::onKeepAliveTick);
+
+#ifdef Q_OS_ANDROID
+    m_devicePollTimer.setInterval(1200);
+    connect(&m_devicePollTimer, &QTimer::timeout,
+            this, &AudioOutput::onDevicePollTick);
+    m_devicePollTimer.start();
+#endif
 }
 
 int AudioOutput::lastFrameBytes() const
@@ -252,6 +259,7 @@ void AudioOutput::playFrame(const QByteArray& pcmFrame)
 
 void AudioOutput::ensureStarted()
 {
+    refreshOutputDevices();
     const QAudioDevice device = resolveOutputDevice();
     if (device.isNull())
         return;
@@ -368,6 +376,29 @@ void AudioOutput::onAudioOutputsChanged()
     ensureStarted();
 }
 
+void AudioOutput::onDevicePollTick()
+{
+#ifdef Q_OS_ANDROID
+    refreshOutputDevices();
+
+    const QAudioDevice target = resolveOutputDevice();
+    if (target.isNull())
+        return;
+
+    if (!m_activeOutputDeviceId.isEmpty() &&
+        m_activeOutputDeviceId == target.id())
+    {
+        return;
+    }
+
+    if (m_sink || m_device)
+    {
+        resetOutputSink();
+        ensureStarted();
+    }
+#endif
+}
+
 void AudioOutput::onKeepAliveTick()
 {
     if (!m_device || !m_sink || m_keepAliveBytes <= 0)
@@ -449,6 +480,24 @@ void AudioOutput::refreshOutputDevices()
         names << device.description();
         ids << encodeDeviceId(device.id());
     }
+
+#ifdef Q_OS_ANDROID
+    bool hasUsbLike = false;
+    for (const QString& n : names)
+    {
+        if (looksLikeUsbOutputName(n))
+        {
+            hasUsbLike = true;
+            break;
+        }
+    }
+    if (!hasUsbLike)
+    {
+        // Fallback virtual route for devices that Android can route but Qt does not enumerate.
+        names << QStringLiteral("USB DAC (Android route)");
+        ids << QStringLiteral("__route_usb__");
+    }
+#endif
 
     if (m_outputDeviceNames != names || m_outputDeviceIds != ids)
     {

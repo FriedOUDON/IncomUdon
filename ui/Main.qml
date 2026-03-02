@@ -422,7 +422,12 @@ Window {
         }
 
         function useAndroidCueToneFallback() {
-            return Qt.platform.os === "android" && isLikelyBluetoothName(selectedMicDeviceName())
+            if (Qt.platform.os !== "android")
+                return false
+            if (audioOutput.selectedOutputDeviceId &&
+                audioOutput.selectedOutputDeviceId.length > 0)
+                return true
+            return isLikelyBluetoothName(selectedMicDeviceName())
         }
 
         function playAndroidCueTone(cueId, enabled) {
@@ -1406,33 +1411,6 @@ Window {
                             }
 
                             Text {
-                                text: qsTr("Speaker Device")
-                                color: "#90a4ae"
-                                font.pixelSize: 13
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: 36
-                                radius: 6
-                                color: "#1a222b"
-                                border.color: "#263238"
-                                border.width: 1
-
-                                ComboBox {
-                                    id: outputDeviceCombo
-                                    anchors.fill: parent
-                                    anchors.margins: 2
-                                    model: audioOutput.outputDeviceNames
-                                    currentIndex: root.outputDeviceIndexFromId(audioOutput.selectedOutputDeviceId)
-                                    onActivated: function(index) {
-                                        if (index >= 0 && index < audioOutput.outputDeviceIds.length)
-                                            audioOutput.selectedOutputDeviceId = audioOutput.outputDeviceIds[index]
-                                    }
-                                }
-                            }
-
-                            Text {
                                 text: qsTr("Channel ID")
                                 color: "#90a4ae"
                                 font.pixelSize: 13
@@ -1659,6 +1637,33 @@ Window {
                                 onEditingFinished: {
                                     appState.senderId = root.parseSenderIdInput(text)
                                     text = appState.senderId > 0 ? appState.senderId.toString() : ""
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: qsTr("Speaker Device")
+                            color: "#90a4ae"
+                            font.pixelSize: 13
+                        }
+
+                        Rectangle {
+                            width: parent.width
+                            height: 36
+                            radius: 6
+                            color: "#1a222b"
+                            border.color: "#263238"
+                            border.width: 1
+
+                            ComboBox {
+                                id: outputDeviceCombo
+                                anchors.fill: parent
+                                anchors.margins: 2
+                                model: audioOutput.outputDeviceNames
+                                currentIndex: root.outputDeviceIndexFromId(audioOutput.selectedOutputDeviceId)
+                                onActivated: function(index) {
+                                    if (index >= 0 && index < audioOutput.outputDeviceIds.length)
+                                        audioOutput.selectedOutputDeviceId = audioOutput.outputDeviceIds[index]
                                 }
                             }
                         }
