@@ -397,6 +397,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
             -DANDROID_ABI=${{ matrix.abi }} \
             -DANDROID_PLATFORM=android-23 \
+            -DUSE_OPENSSL_ANDROID_PREBUILT=ON \
+            -DUSE_OPUS_ANDROID_PREBUILT=ON \
             ${{ env.CMAKE_COMMON_ARGS }}
 
       - name: Build

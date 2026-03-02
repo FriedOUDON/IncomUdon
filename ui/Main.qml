@@ -2035,7 +2035,9 @@ Window {
                         Text {
                             text: appState.opusLibraryPath.length > 0 ?
                                       root.fileNameFromUrl(appState.opusLibraryPath) :
-                                      qsTr("(using linked opus)")
+                                      (root.opusSelectable ?
+                                           qsTr("(using linked opus)") :
+                                           qsTr("(Opus disabled in this build)"))
                             color: "#607d8b"
                             font.pixelSize: 12
                         }
@@ -2043,15 +2045,18 @@ Window {
                         Text {
                             width: parent.width
                             wrapMode: Text.Wrap
-                            text: appState.opusLibraryPath.length === 0 ?
-                                      qsTr("Using linked Opus library.") :
-                                      (appState.opusLibraryLoaded ?
-                                           qsTr("Loaded user-specified Opus library.") :
-                                           (appState.opusLibraryError.length > 0 ?
-                                                appState.opusLibraryError :
-                                                qsTr("Opus library not loaded (linked fallback).")))
-                            color: (appState.opusLibraryPath.length === 0 || appState.opusLibraryLoaded) ?
-                                       "#4db6ac" : "#78909c"
+                            text: !root.opusSelectable ?
+                                      qsTr("Opus support is disabled in this build.") :
+                                      (appState.opusLibraryPath.length === 0 ?
+                                           qsTr("Using linked Opus library.") :
+                                           (appState.opusLibraryLoaded ?
+                                                qsTr("Loaded user-specified Opus library.") :
+                                                (appState.opusLibraryError.length > 0 ?
+                                                     appState.opusLibraryError :
+                                                     qsTr("Opus library not loaded (linked fallback)."))))
+                            color: !root.opusSelectable ? "#78909c" :
+                                       ((appState.opusLibraryPath.length === 0 || appState.opusLibraryLoaded) ?
+                                            "#4db6ac" : "#78909c")
                             font.pixelSize: 12
                         }
 
