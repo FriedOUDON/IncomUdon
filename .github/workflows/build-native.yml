@@ -312,6 +312,11 @@ jobs:
   android:
     name: Android (arm64-v8a)
     runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -336,6 +341,17 @@ jobs:
           echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
+      - name: Check Android Signing Secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for key in ANDROID_KEYSTORE_BASE64 ANDROID_KEY_ALIAS ANDROID_KEYSTORE_PASSWORD; do
+            if [ -z "${!key:-}" ]; then
+              echo "Missing required secret: $key" >&2
+              exit 1
+            fi
+          done
+
       - name: Setup Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
@@ -359,15 +375,53 @@ jobs:
       - name: Build
         run: cmake --build build-android --config ${{ env.CMAKE_BUILD_TYPE }} --target appIncomUdon --parallel
 
-      - name: Build APK (best effort)
-        run: cmake --build build-android --config ${{ env.CMAKE_BUILD_TYPE }} --target apk --parallel || true
+      - name: Build APK (Release)
+        run: cmake --build build-android --config ${{ env.CMAKE_BUILD_TYPE }} --target apk --parallel
+
+      - name: Sign APK (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/android
+
+          UNSIGNED_APK="$(find build-android -type f -name '*release-unsigned.apk' | head -n 1)"
+          if [ -z "$UNSIGNED_APK" ]; then
+            echo "Release unsigned APK not found under build-android" >&2
+            find build-android -type f -name '*.apk' -print || true
+            exit 1
+          fi
+
+          KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          ALIGNED_APK="$RUNNER_TEMP/appIncomUdon-release-aligned.apk"
+          SIGNED_APK="$PWD/dist/android/appIncomUdon-release-signed.apk"
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+
+          ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/34.0.0/zipalign"
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner"
+          if [ ! -x "$ZIPALIGN" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "zipalign/apksigner not found in build-tools/34.0.0" >&2
+            exit 1
+          fi
+
+          "$ZIPALIGN" -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+
+          KEY_PASS="${ANDROID_KEY_PASSWORD:-$ANDROID_KEYSTORE_PASSWORD}"
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASS" \
+            --out "$SIGNED_APK" \
+            "$ALIGNED_APK"
+
+          "$APKSIGNER" verify --verbose "$SIGNED_APK"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: incomudon-android-arm64-v8a
           path: |
-            build-android/**/*.apk
-            build-android/**/*.aab
+            dist/android/*.apk
             build-android/**/*.so
           if-no-files-found: error
