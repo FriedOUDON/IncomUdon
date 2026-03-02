@@ -399,13 +399,20 @@ Window {
 
         function syncCueAudioDevice() {
             var target = cueMediaDevices.defaultAudioOutput
-            if (isLikelyBluetoothName(selectedMicDeviceName())) {
+            var outIndex = outputDeviceIndexFromId(audioOutput.selectedOutputDeviceId)
+            if (outIndex > 0) {
                 var outputs = cueMediaDevices.audioOutputs
-                if (outputs && outputs.length > 0) {
-                    for (var i = 0; i < outputs.length; ++i) {
-                        var desc = outputs[i].description
+                var rawIndex = outIndex - 1
+                if (outputs && rawIndex >= 0 && rawIndex < outputs.length)
+                    target = outputs[rawIndex]
+            }
+            if (outIndex <= 0 && isLikelyBluetoothName(selectedMicDeviceName())) {
+                var btOutputs = cueMediaDevices.audioOutputs
+                if (btOutputs && btOutputs.length > 0) {
+                    for (var i = 0; i < btOutputs.length; ++i) {
+                        var desc = btOutputs[i].description
                         if (isLikelyBluetoothName(desc)) {
-                            target = outputs[i]
+                            target = btOutputs[i]
                             break
                         }
                     }
@@ -453,6 +460,17 @@ Window {
             return 0
         }
 
+        function outputDeviceIndexFromId(deviceId) {
+            var ids = audioOutput.outputDeviceIds
+            if (!ids || ids.length === 0)
+                return 0
+            for (var i = 0; i < ids.length; ++i) {
+                if (ids[i] === deviceId)
+                    return i
+            }
+            return 0
+        }
+
         Settings {
             id: persisted
             category: "ui"
@@ -485,6 +503,7 @@ Window {
             property string codec2LibraryPath: ""
             property string opusLibraryPath: ""
             property string micInputDeviceId: ""
+            property string outputDeviceId: ""
         }
 
         Component.onCompleted: {
@@ -543,6 +562,7 @@ Window {
             appState.codec2LibraryPath = persisted.codec2LibraryPath
             appState.opusLibraryPath = persisted.opusLibraryPath
             audioInput.selectedInputDeviceId = persisted.micInputDeviceId
+            audioOutput.selectedOutputDeviceId = persisted.outputDeviceId
 
             root.syncCodec2Availability()
             root.syncCueAudioDevice()
@@ -604,6 +624,19 @@ Window {
                 root.recoverCueEngine(true)
             }
             function onInputDevicesChanged() {
+                root.syncCueAudioDevice()
+                root.recoverCueEngine()
+            }
+        }
+
+        Connections {
+            target: audioOutput
+            function onSelectedOutputDeviceIdChanged() {
+                persisted.outputDeviceId = audioOutput.selectedOutputDeviceId
+                root.syncCueAudioDevice()
+                root.recoverCueEngine(true)
+            }
+            function onOutputDevicesChanged() {
                 root.syncCueAudioDevice()
                 root.recoverCueEngine()
             }
@@ -1368,6 +1401,33 @@ Window {
                                         text: appState.speakerVolumePercent + "%"
                                         color: appState.speakerVolumePercent === 100 ? "#4db6ac" : "#cfd8dc"
                                         font.pixelSize: 14
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: qsTr("Speaker Device")
+                                color: "#90a4ae"
+                                font.pixelSize: 13
+                            }
+
+                            Rectangle {
+                                width: parent.width
+                                height: 36
+                                radius: 6
+                                color: "#1a222b"
+                                border.color: "#263238"
+                                border.width: 1
+
+                                ComboBox {
+                                    id: outputDeviceCombo
+                                    anchors.fill: parent
+                                    anchors.margins: 2
+                                    model: audioOutput.outputDeviceNames
+                                    currentIndex: root.outputDeviceIndexFromId(audioOutput.selectedOutputDeviceId)
+                                    onActivated: function(index) {
+                                        if (index >= 0 && index < audioOutput.outputDeviceIds.length)
+                                            audioOutput.selectedOutputDeviceId = audioOutput.outputDeviceIds[index]
                                     }
                                 }
                             }

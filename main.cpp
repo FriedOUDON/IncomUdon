@@ -940,6 +940,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("cryptoUtils", &cryptoUtils);
     engine.rootContext()->setContextProperty("licenseProvider", &licenseProvider);
     engine.rootContext()->setContextProperty("audioInput", &audioInput);
+    engine.rootContext()->setContextProperty("audioOutput", &audioOutput);
     engine.rootContext()->setContextProperty("pttController", &pttController);
     engine.rootContext()->setContextProperty("channelManager", &channelManager);
     engine.rootContext()->setContextProperty("androidPttBridge", &androidPttBridge);

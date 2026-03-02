@@ -9,6 +9,7 @@
 #include <QMediaDevices>
 #include <QIODevice>
 #include <QTimer>
+#include <QStringList>
 #include <QtGlobal>
 
 #include "audio/AudioResampler.h"
@@ -20,6 +21,16 @@ class AudioOutput : public QObject
     Q_PROPERTY(int lastFrameBytes
                READ lastFrameBytes
                NOTIFY lastFrameBytesChanged)
+    Q_PROPERTY(QStringList outputDeviceNames
+               READ outputDeviceNames
+               NOTIFY outputDevicesChanged)
+    Q_PROPERTY(QStringList outputDeviceIds
+               READ outputDeviceIds
+               NOTIFY outputDevicesChanged)
+    Q_PROPERTY(QString selectedOutputDeviceId
+               READ selectedOutputDeviceId
+               WRITE setSelectedOutputDeviceId
+               NOTIFY selectedOutputDeviceIdChanged)
 
 public:
     explicit AudioOutput(QObject* parent = nullptr);
@@ -28,6 +39,10 @@ public:
     int queuedMs() const;
     int outputGainPercent() const;
     void setOutputGainPercent(int percent);
+    QStringList outputDeviceNames() const;
+    QStringList outputDeviceIds() const;
+    QString selectedOutputDeviceId() const;
+    void setSelectedOutputDeviceId(const QString& deviceId);
 
 public slots:
     void playFrame(const QByteArray& pcmFrame);
@@ -35,6 +50,8 @@ public slots:
 signals:
     void framePlayed(int bytes);
     void lastFrameBytesChanged();
+    void outputDevicesChanged();
+    void selectedOutputDeviceIdChanged();
 
 private:
     void resetOutputSink();
@@ -43,6 +60,10 @@ private:
     void onAudioOutputsChanged();
     void flushPending();
     void trimPending();
+    void refreshOutputDevices();
+    QAudioDevice resolveOutputDevice() const;
+    static QString encodeDeviceId(const QByteArray& rawId);
+    static QByteArray decodeDeviceId(const QString& encodedId);
 
     QAudioSink* m_sink = nullptr;
     QIODevice* m_device = nullptr;
@@ -57,6 +78,9 @@ private:
     QByteArray m_pendingOutput;
     QByteArray m_activeOutputDeviceId;
     QMediaDevices* m_mediaDevices = nullptr;
+    QStringList m_outputDeviceNames;
+    QStringList m_outputDeviceIds;
+    QString m_selectedOutputDeviceId;
     int m_outputFrameBytes = 2;
     int m_pendingSoftLimitBytes = 0;
     int m_pendingHardLimitBytes = 0;

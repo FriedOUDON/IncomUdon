@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <QDebug>
+#include <QByteArray>
 #include <QtEndian>
 #include <cstring>
 
@@ -16,24 +17,32 @@ static bool looksLikeBluetoothOutputName(const QString& name)
            n.contains(QStringLiteral("wireless"));
 }
 
-static QAudioDevice resolvePreferredOutputDevice()
+static bool looksLikeUsbOutputName(const QString& name)
 {
-    const QAudioDevice defaultDevice = QMediaDevices::defaultAudioOutput();
-#ifdef Q_OS_ANDROID
-    if (!defaultDevice.isNull() &&
-        looksLikeBluetoothOutputName(defaultDevice.description()))
-    {
-        return defaultDevice;
-    }
+    const QString n = name.toLower();
+    return n.contains(QStringLiteral("usb")) ||
+           n.contains(QStringLiteral("dac")) ||
+           n.contains(QStringLiteral("audioquest")) ||
+           n.contains(QStringLiteral("fiio")) ||
+           n.contains(QStringLiteral("hiby"));
+}
 
-    const QList<QAudioDevice> outputs = QMediaDevices::audioOutputs();
-    for (const QAudioDevice& device : outputs)
-    {
-        if (looksLikeBluetoothOutputName(device.description()))
-            return device;
-    }
-#endif
-    return defaultDevice;
+static bool looksLikeWiredOutputName(const QString& name)
+{
+    const QString n = name.toLower();
+    return n.contains(QStringLiteral("headphone")) ||
+           n.contains(QStringLiteral("headset")) ||
+           n.contains(QStringLiteral("wired")) ||
+           n.contains(QStringLiteral("jack")) ||
+           n.contains(QStringLiteral("line out"));
+}
+
+static bool looksLikeBuiltinSpeakerName(const QString& name)
+{
+    const QString n = name.toLower();
+    return n.contains(QStringLiteral("speaker")) ||
+           n.contains(QStringLiteral("phone")) ||
+           n.contains(QStringLiteral("built-in"));
 }
 
 static QVector<qint16> toMonoInt16(const QByteArray& data)
@@ -145,6 +154,7 @@ AudioOutput::AudioOutput(QObject* parent)
     m_mediaDevices = new QMediaDevices(this);
     connect(m_mediaDevices, &QMediaDevices::audioOutputsChanged,
             this, &AudioOutput::onAudioOutputsChanged);
+    refreshOutputDevices();
 
     m_keepAliveTimer.setInterval(m_keepAliveMs);
     connect(&m_keepAliveTimer, &QTimer::timeout,
@@ -184,6 +194,36 @@ void AudioOutput::setOutputGainPercent(int percent)
     m_outputGainPercent = qBound(0, percent, 400);
 }
 
+QStringList AudioOutput::outputDeviceNames() const
+{
+    return m_outputDeviceNames;
+}
+
+QStringList AudioOutput::outputDeviceIds() const
+{
+    return m_outputDeviceIds;
+}
+
+QString AudioOutput::selectedOutputDeviceId() const
+{
+    return m_selectedOutputDeviceId;
+}
+
+void AudioOutput::setSelectedOutputDeviceId(const QString& deviceId)
+{
+    const QString normalized = deviceId.trimmed();
+    if (m_selectedOutputDeviceId == normalized)
+        return;
+
+    m_selectedOutputDeviceId = normalized;
+    emit selectedOutputDeviceIdChanged();
+    if (m_sink || m_device)
+    {
+        resetOutputSink();
+        ensureStarted();
+    }
+}
+
 void AudioOutput::playFrame(const QByteArray& pcmFrame)
 {
     ensureStarted();
@@ -212,7 +252,7 @@ void AudioOutput::playFrame(const QByteArray& pcmFrame)
 
 void AudioOutput::ensureStarted()
 {
-    const QAudioDevice device = resolvePreferredOutputDevice();
+    const QAudioDevice device = resolveOutputDevice();
     if (device.isNull())
         return;
 
@@ -311,10 +351,21 @@ void AudioOutput::resetOutputSink()
 
 void AudioOutput::onAudioOutputsChanged()
 {
-    // Re-open sink on route changes (e.g. Bluetooth A2DP/SCO switch on PTT).
+    const QByteArray previousActiveId = m_activeOutputDeviceId;
+    refreshOutputDevices();
+
+    // Re-open sink on route changes (e.g. device plug/unplug).
     if (!m_sink && !m_device)
         return;
+
+    const QAudioDevice target = resolveOutputDevice();
+    if (target.isNull())
+        return;
+    if (!previousActiveId.isEmpty() && previousActiveId == target.id())
+        return;
+
     resetOutputSink();
+    ensureStarted();
 }
 
 void AudioOutput::onKeepAliveTick()
@@ -378,4 +429,103 @@ void AudioOutput::trimPending()
     if (dropBytes > m_pendingOutput.size())
         dropBytes = m_pendingOutput.size();
     m_pendingOutput.remove(0, dropBytes);
+}
+
+void AudioOutput::refreshOutputDevices()
+{
+    const QList<QAudioDevice> devices = QMediaDevices::audioOutputs();
+    const QAudioDevice defaultDevice = QMediaDevices::defaultAudioOutput();
+
+    QStringList names;
+    QStringList ids;
+    if (!defaultDevice.isNull())
+        names << QStringLiteral("System default (%1)").arg(defaultDevice.description());
+    else
+        names << QStringLiteral("System default");
+    ids << QString();
+
+    for (const QAudioDevice& device : devices)
+    {
+        names << device.description();
+        ids << encodeDeviceId(device.id());
+    }
+
+    if (m_outputDeviceNames != names || m_outputDeviceIds != ids)
+    {
+        m_outputDeviceNames = names;
+        m_outputDeviceIds = ids;
+        emit outputDevicesChanged();
+    }
+
+    if (!m_selectedOutputDeviceId.isEmpty() &&
+        !m_outputDeviceIds.contains(m_selectedOutputDeviceId))
+    {
+        m_selectedOutputDeviceId.clear();
+        emit selectedOutputDeviceIdChanged();
+    }
+}
+
+QAudioDevice AudioOutput::resolveOutputDevice() const
+{
+    const QList<QAudioDevice> outputs = QMediaDevices::audioOutputs();
+    const QAudioDevice defaultDevice = QMediaDevices::defaultAudioOutput();
+
+    if (!m_selectedOutputDeviceId.isEmpty())
+    {
+        const QByteArray wantedId = decodeDeviceId(m_selectedOutputDeviceId);
+        if (!wantedId.isEmpty())
+        {
+            for (const QAudioDevice& device : outputs)
+            {
+                if (device.id() == wantedId)
+                    return device;
+            }
+        }
+    }
+
+#ifdef Q_OS_ANDROID
+    // Prefer external devices (BT/USB/wired) over built-in speaker when available.
+    QAudioDevice bestExternal;
+    int bestScore = -1;
+    for (const QAudioDevice& device : outputs)
+    {
+        const QString name = device.description();
+        int score = 0;
+        if (looksLikeBluetoothOutputName(name))
+            score = 300;
+        else if (looksLikeUsbOutputName(name))
+            score = 250;
+        else if (looksLikeWiredOutputName(name))
+            score = 200;
+        else if (looksLikeBuiltinSpeakerName(name))
+            score = 10;
+        else
+            score = 80;
+
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestExternal = device;
+        }
+    }
+
+    if (!bestExternal.isNull() && bestScore >= 200)
+        return bestExternal;
+#endif
+
+    return defaultDevice;
+}
+
+QString AudioOutput::encodeDeviceId(const QByteArray& rawId)
+{
+    if (rawId.isEmpty())
+        return QString();
+    return QString::fromLatin1(rawId.toBase64());
+}
+
+QByteArray AudioOutput::decodeDeviceId(const QString& encodedId)
+{
+    if (encodedId.isEmpty())
+        return QByteArray();
+    return QByteArray::fromBase64(encodedId.toLatin1());
 }
