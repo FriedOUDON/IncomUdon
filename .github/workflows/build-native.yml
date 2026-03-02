@@ -63,7 +63,7 @@ jobs:
           cache: true
 
       - name: Configure
-        run: qt-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ env.CMAKE_COMMON_ARGS }}
+        run: qt-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ env.CMAKE_COMMON_ARGS }} -DUSE_OPUS_WINDOWS_PREBUILT=ON
 
       - name: Build
         run: cmake --build build --config ${{ env.CMAKE_BUILD_TYPE }} --parallel
