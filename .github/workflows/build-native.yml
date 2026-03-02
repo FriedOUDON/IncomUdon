@@ -310,8 +310,22 @@ jobs:
           if-no-files-found: error
 
   android:
-    name: Android (arm64-v8a)
+    name: Android (${{ matrix.abi }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            qt_arch: android_arm64_v8a
+            artifact_name: incomudon-android-arm64-v8a
+            apk_suffix: arm64-v8a
+          - abi: armeabi-v7a
+            qt_arch: android_armv7
+            artifact_name: incomudon-android-armeabi-v7a
+            apk_suffix: armeabi-v7a
+    permissions:
+      contents: write
     env:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -360,7 +374,7 @@ jobs:
         with:
           version: ${{ env.QT_VERSION }}
           target: android
-          arch: android_arm64_v8a
+          arch: ${{ matrix.qt_arch }}
           modules: ${{ env.QT_MODULES }}
           cache: true
 
@@ -368,7 +382,7 @@ jobs:
         run: |
           qt-cmake -S . -B build-android -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
-            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_ABI=${{ matrix.abi }} \
             -DANDROID_PLATFORM=android-23 \
             ${{ env.CMAKE_COMMON_ARGS }}
 
@@ -393,7 +407,7 @@ jobs:
 
           KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
           ALIGNED_APK="$RUNNER_TEMP/appIncomUdon-release-aligned.apk"
-          SIGNED_APK="$PWD/dist/android/appIncomUdon-release-signed.apk"
+          SIGNED_APK="$PWD/dist/android/appIncomUdon-release-signed-${{ matrix.apk_suffix }}.apk"
 
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
 
@@ -420,8 +434,14 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: incomudon-android-arm64-v8a
+          name: ${{ matrix.artifact_name }}
           path: |
             dist/android/*.apk
             build-android/**/*.so
           if-no-files-found: error
+
+      - name: Publish Signed APK to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/android/appIncomUdon-release-signed-${{ matrix.apk_suffix }}.apk
