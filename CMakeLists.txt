@@ -509,7 +509,13 @@ if(WIN32 AND USE_OPUS_WINDOWS_PREBUILT AND NOT INCOMUDON_OPUS_FOUND)
         endif()
 
         if(_inc AND (_lib OR _runtime_only))
-            add_library(incomudon_opus ${_kind} IMPORTED GLOBAL)
+            if(_runtime_only)
+                add_library(incomudon_opus SHARED IMPORTED GLOBAL)
+            elseif(_kind)
+                add_library(incomudon_opus ${_kind} IMPORTED GLOBAL)
+            else()
+                add_library(incomudon_opus UNKNOWN IMPORTED GLOBAL)
+            endif()
             if(_runtime_only)
                 # Runtime-only fallback: compile opus paths and load libopus dynamically.
                 set_target_properties(incomudon_opus PROPERTIES
