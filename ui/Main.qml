@@ -1090,10 +1090,17 @@ Window {
                 TabBar {
                     id: tabs
                     width: parent.width - menuButton.width - tabRow.spacing
+                    font.family: Qt.application.font.family
                     onCurrentIndexChanged: persisted.pageIndex = currentIndex
 
-                    TabButton { text: qsTr("Talk") }
-                    TabButton { text: qsTr("Settings") }
+                    TabButton {
+                        text: qsTr("Talk")
+                        font.family: tabs.font.family
+                    }
+                    TabButton {
+                        text: qsTr("Settings")
+                        font.family: tabs.font.family
+                    }
                 }
 
                 ToolButton {
