@@ -502,24 +502,6 @@ void AudioOutput::refreshOutputDevices()
         ids << encodeDeviceId(device.id());
     }
 
-#ifdef Q_OS_ANDROID
-    bool hasUsbLike = false;
-    for (const QString& n : names)
-    {
-        if (looksLikeUsbOutputName(n))
-        {
-            hasUsbLike = true;
-            break;
-        }
-    }
-    if (!hasUsbLike)
-    {
-        // Fallback virtual route for devices that Android can route but Qt does not enumerate.
-        names << QStringLiteral("USB DAC (Android route)");
-        ids << QStringLiteral("__route_usb__");
-    }
-#endif
-
     if (m_outputDeviceNames != names || m_outputDeviceIds != ids)
     {
         m_outputDeviceNames = names;
