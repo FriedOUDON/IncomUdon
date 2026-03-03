@@ -447,8 +447,7 @@ int main(int argc, char *argv[])
     QObject::connect(&appState, &AppState::cryptoModeChanged,
                      &appState, applyCryptoPreference);
 
-    auto applyCodecSettings = [&codecTx, &audioInput, &appState]() {
-        codecTx.setMode(appState.codecBitrate());
+    auto syncAudioInputToCodec = [&codecTx, &audioInput]() {
         const int pcmBytes = codecTx.pcmFrameBytes();
         const int frameMs = codecTx.frameMs();
         if (pcmBytes > 0)
@@ -459,6 +458,10 @@ int main(int argc, char *argv[])
         {
             audioInput.setIntervalMs(frameMs);
         }
+    };
+    auto applyCodecBitrate = [&codecTx, &appState, &syncAudioInputToCodec]() {
+        codecTx.setMode(appState.codecBitrate());
+        syncAudioInputToCodec();
     };
 
     auto applyCodecSelection = [&codecTx, &appState]() {
@@ -510,13 +513,13 @@ int main(int argc, char *argv[])
         syncOpusLibraryState();
     });
     QObject::connect(&codecTx, &Codec2Wrapper::pcmFrameBytesChanged,
-                     &appState, applyCodecSettings);
+                     &appState, syncAudioInputToCodec);
     QObject::connect(&codecTx, &Codec2Wrapper::frameMsChanged,
-                     &appState, applyCodecSettings);
+                     &appState, syncAudioInputToCodec);
 
     QObject::connect(&appState, &AppState::codecBitrateChanged,
-                     &appState, [&applyCodecSettings, &codecTx]() {
-        applyCodecSettings();
+                     &appState, [&applyCodecBitrate, &codecTx]() {
+        applyCodecBitrate();
         logCodecStatus(QStringLiteral("TX codec mode=%1 forcePcm=%2 codec2Active=%3 opusActive=%4")
                            .arg(codecTx.mode())
                            .arg(codecTx.forcePcm() ? 1 : 0)
@@ -652,16 +655,16 @@ int main(int argc, char *argv[])
         sendCodecConfig(false);
     });
     QObject::connect(&codecTx, &Codec2Wrapper::codec2ActiveChanged,
-                     &appState, [&applyCodecSettings, &sendCodecConfig, &codecTx]() {
-        applyCodecSettings();
+                     &appState, [&syncAudioInputToCodec, &sendCodecConfig, &codecTx]() {
+        syncAudioInputToCodec();
         sendCodecConfig(true);
         logCodecStatus(QStringLiteral("TX codec active changed codec2=%1 opus=%2")
                            .arg(codecTx.codec2Active() ? 1 : 0)
                            .arg(codecTx.opusActive() ? 1 : 0));
     });
     QObject::connect(&codecTx, &Codec2Wrapper::opusActiveChanged,
-                     &appState, [&applyCodecSettings, &sendCodecConfig, &codecTx]() {
-        applyCodecSettings();
+                     &appState, [&syncAudioInputToCodec, &sendCodecConfig, &codecTx]() {
+        syncAudioInputToCodec();
         sendCodecConfig(true);
         logCodecStatus(QStringLiteral("TX codec active changed codec2=%1 opus=%2")
                            .arg(codecTx.codec2Active() ? 1 : 0)
@@ -1011,7 +1014,7 @@ int main(int argc, char *argv[])
     pttController.setFecEnabled(appState.fecEnabled());
     pttController.setAlwaysKeepInputSession(appState.keepMicSessionAlwaysOn());
 
-    applyCodecSettings();
+    applyCodecBitrate();
     codecTx.setCodec2LibraryPath(appState.codec2LibraryPath());
     codecRx.setCodec2LibraryPath(appState.codec2LibraryPath());
     syncCodec2LibraryState();
