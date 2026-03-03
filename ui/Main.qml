@@ -401,10 +401,19 @@ Window {
             var target = cueMediaDevices.defaultAudioOutput
             var outIndex = outputDeviceIndexFromId(audioOutput.selectedOutputDeviceId)
             if (outIndex > 0) {
+                var selectedNames = audioOutput.outputDeviceNames
+                var wantedName = ""
+                if (selectedNames && outIndex >= 0 && outIndex < selectedNames.length)
+                    wantedName = selectedNames[outIndex]
                 var outputs = cueMediaDevices.audioOutputs
-                var rawIndex = outIndex - 1
-                if (outputs && rawIndex >= 0 && rawIndex < outputs.length)
-                    target = outputs[rawIndex]
+                if (outputs && outputs.length > 0 && wantedName.length > 0) {
+                    for (var j = 0; j < outputs.length; ++j) {
+                        if (outputs[j].description === wantedName) {
+                            target = outputs[j]
+                            break
+                        }
+                    }
+                }
             }
             if (outIndex <= 0 && isLikelyBluetoothName(selectedMicDeviceName())) {
                 var btOutputs = cueMediaDevices.audioOutputs
@@ -422,22 +431,11 @@ Window {
         }
 
         function useAndroidCueToneFallback() {
-            if (Qt.platform.os !== "android")
-                return false
-            if (audioOutput.selectedOutputDeviceId &&
-                audioOutput.selectedOutputDeviceId.length > 0)
-                return true
-            return isLikelyBluetoothName(selectedMicDeviceName())
+            return false
         }
 
         function playAndroidCueTone(cueId, enabled) {
-            if (!enabled)
-                return
-            if (!useAndroidCueToneFallback())
-                return
-            if (!androidPttBridge)
-                return
-            androidPttBridge.playCueTone(cueId)
+            return
         }
 
         function syncCodec2Availability() {

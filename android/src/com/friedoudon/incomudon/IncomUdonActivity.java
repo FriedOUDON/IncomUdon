@@ -12,7 +12,6 @@ import android.net.NetworkRequest;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.PowerManager;
 import android.provider.OpenableColumns;
 import android.view.KeyEvent;
 import java.io.File;
@@ -24,10 +23,9 @@ import org.qtproject.qt.android.bindings.QtActivity;
 public class IncomUdonActivity extends QtActivity {
     private static final int OUTPUT_ROUTE_AUTO = 0;
     private static final int OUTPUT_ROUTE_SPEAKER = 1;
-    private static final int OUTPUT_ROUTE_EARPIECE = 2;
-    private static final int OUTPUT_ROUTE_BLUETOOTH = 3;
-    private static final int OUTPUT_ROUTE_USB = 4;
-    private static final int OUTPUT_ROUTE_WIRED = 5;
+    private static final int OUTPUT_ROUTE_BLUETOOTH = 2;
+    private static final int OUTPUT_ROUTE_USB = 3;
+    private static final int OUTPUT_ROUTE_WIRED = 4;
 
     public static native void onHeadsetPttChanged(boolean pressed);
     public static native void onNetworkAvailabilityChanged(boolean available);
@@ -40,7 +38,6 @@ public class IncomUdonActivity extends QtActivity {
     private boolean mPttRouteEnabled = false;
     private boolean mPreferCommunicationMode = false;
     private int mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
-    private PowerManager.WakeLock mProximityWakeLock;
     private ToneGenerator mToneVoiceCall;
     private ToneGenerator mToneMedia;
 
@@ -50,17 +47,6 @@ public class IncomUdonActivity extends QtActivity {
         sInstance = this;
         mAudioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         mConnectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-        try {
-            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-            if (pm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                mProximityWakeLock = pm.newWakeLock(
-                    PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
-                    "IncomUdon:Proximity");
-                mProximityWakeLock.setReferenceCounted(false);
-            }
-        } catch (Exception ignored) {
-            mProximityWakeLock = null;
-        }
         forceMediaVolumeStream();
         registerNetworkCallback();
         notifyNetworkAvailabilityChanged(isNetworkAvailable());
@@ -73,7 +59,6 @@ public class IncomUdonActivity extends QtActivity {
         mPreferCommunicationMode = false;
         mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
         applyPttAudioRoute(false, true);
-        setProximityScreenOffEnabled(false);
         releaseToneGenerators();
         if (sInstance == this) {
             sInstance = null;
@@ -85,13 +70,6 @@ public class IncomUdonActivity extends QtActivity {
     protected void onResume() {
         super.onResume();
         forceMediaVolumeStream();
-        setProximityScreenOffEnabled(mPreferredOutputRoute == OUTPUT_ROUTE_EARPIECE);
-    }
-
-    @Override
-    protected void onPause() {
-        setProximityScreenOffEnabled(false);
-        super.onPause();
     }
 
     public static void setPttAudioRoute(final boolean enabled) {
@@ -328,8 +306,7 @@ public class IncomUdonActivity extends QtActivity {
         if (mPreferCommunicationMode) {
             return true;
         }
-        return mPreferredOutputRoute == OUTPUT_ROUTE_EARPIECE ||
-               mPreferredOutputRoute == OUTPUT_ROUTE_BLUETOOTH ||
+        return mPreferredOutputRoute == OUTPUT_ROUTE_BLUETOOTH ||
                mPreferredOutputRoute == OUTPUT_ROUTE_USB ||
                mPreferredOutputRoute == OUTPUT_ROUTE_WIRED;
     }
@@ -377,7 +354,6 @@ public class IncomUdonActivity extends QtActivity {
             if (enabled) {
                 mAudioManager.setMicrophoneMute(false);
             }
-            setProximityScreenOffEnabled(mPreferredOutputRoute == OUTPUT_ROUTE_EARPIECE);
             forceMediaVolumeStream();
         } catch (SecurityException ignored) {
         }
@@ -410,8 +386,6 @@ public class IncomUdonActivity extends QtActivity {
         }
         final int type = d.getType();
         switch (mPreferredOutputRoute) {
-            case OUTPUT_ROUTE_EARPIECE:
-                return type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE;
             case OUTPUT_ROUTE_SPEAKER:
                 return type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
             case OUTPUT_ROUTE_BLUETOOTH:
@@ -545,22 +519,6 @@ public class IncomUdonActivity extends QtActivity {
                type == AudioDeviceInfo.TYPE_LINE_DIGITAL;
     }
 
-    private void setProximityScreenOffEnabled(boolean enabled) {
-        if (mProximityWakeLock == null) {
-            return;
-        }
-        try {
-            if (enabled) {
-                if (!mProximityWakeLock.isHeld()) {
-                    mProximityWakeLock.acquire();
-                }
-            } else if (mProximityWakeLock.isHeld()) {
-                mProximityWakeLock.release();
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
     private void playCueToneInternal(int cueId) {
         final ToneGenerator tg = obtainCueToneGenerator();
         if (tg == null) {
@@ -593,7 +551,7 @@ public class IncomUdonActivity extends QtActivity {
     }
 
     private ToneGenerator obtainCueToneGenerator() {
-        final int stream = shouldUseCommunicationMode() || mPreferredOutputRoute == OUTPUT_ROUTE_EARPIECE
+        final int stream = shouldUseCommunicationMode()
             ? AudioManager.STREAM_VOICE_CALL
             : AudioManager.STREAM_MUSIC;
         if (stream == AudioManager.STREAM_VOICE_CALL) {
@@ -636,8 +594,7 @@ public class IncomUdonActivity extends QtActivity {
 
     private void forceMediaVolumeStream() {
         try {
-            final boolean useVoiceStream = shouldUseCommunicationMode() ||
-                                           mPreferredOutputRoute == OUTPUT_ROUTE_EARPIECE;
+            final boolean useVoiceStream = shouldUseCommunicationMode();
             setVolumeControlStream(useVoiceStream
                 ? AudioManager.STREAM_VOICE_CALL
                 : AudioManager.STREAM_MUSIC);

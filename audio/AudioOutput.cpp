@@ -45,6 +45,14 @@ static bool looksLikeBuiltinSpeakerName(const QString& name)
            n.contains(QStringLiteral("built-in"));
 }
 
+static bool looksLikeEarpieceOutputName(const QString& name)
+{
+    const QString n = name.toLower();
+    return n.contains(QStringLiteral("earpiece")) ||
+           n.contains(QStringLiteral("receiver")) ||
+           n.contains(QStringLiteral("handset"));
+}
+
 static QVector<qint16> toMonoInt16(const QByteArray& data)
 {
     const int samples = data.size() / static_cast<int>(sizeof(qint16));
@@ -470,13 +478,26 @@ void AudioOutput::refreshOutputDevices()
     QStringList names;
     QStringList ids;
     if (!defaultDevice.isNull())
+    {
+#ifdef Q_OS_ANDROID
+        if (looksLikeEarpieceOutputName(defaultDevice.description()))
+            names << QStringLiteral("System default");
+        else
+            names << QStringLiteral("System default (%1)").arg(defaultDevice.description());
+#else
         names << QStringLiteral("System default (%1)").arg(defaultDevice.description());
+#endif
+    }
     else
         names << QStringLiteral("System default");
     ids << QString();
 
     for (const QAudioDevice& device : devices)
     {
+#ifdef Q_OS_ANDROID
+        if (looksLikeEarpieceOutputName(device.description()))
+            continue;
+#endif
         names << device.description();
         ids << encodeDeviceId(device.id());
     }
@@ -527,7 +548,13 @@ QAudioDevice AudioOutput::resolveOutputDevice() const
             for (const QAudioDevice& device : outputs)
             {
                 if (device.id() == wantedId)
+                {
+#ifdef Q_OS_ANDROID
+                    if (looksLikeEarpieceOutputName(device.description()))
+                        break;
+#endif
                     return device;
+                }
             }
         }
     }
@@ -535,10 +562,13 @@ QAudioDevice AudioOutput::resolveOutputDevice() const
 #ifdef Q_OS_ANDROID
     // Prefer external devices (BT/USB/wired) over built-in speaker when available.
     QAudioDevice bestExternal;
+    QAudioDevice bestSpeaker;
     int bestScore = -1;
     for (const QAudioDevice& device : outputs)
     {
         const QString name = device.description();
+        if (looksLikeEarpieceOutputName(name))
+            continue;
         int score = 0;
         if (looksLikeBluetoothOutputName(name))
             score = 300;
@@ -556,10 +586,17 @@ QAudioDevice AudioOutput::resolveOutputDevice() const
             bestScore = score;
             bestExternal = device;
         }
+        if (bestSpeaker.isNull() && looksLikeBuiltinSpeakerName(name))
+            bestSpeaker = device;
     }
 
     if (!bestExternal.isNull() && bestScore >= 200)
         return bestExternal;
+
+    if (!defaultDevice.isNull() && !looksLikeEarpieceOutputName(defaultDevice.description()))
+        return defaultDevice;
+    if (!bestSpeaker.isNull())
+        return bestSpeaker;
 #endif
 
     return defaultDevice;

@@ -211,12 +211,6 @@ int main(int argc, char *argv[])
                n.contains(QStringLiteral("fiio")) ||
                n.contains(QStringLiteral("hiby"));
     };
-    auto isLikelyEarpieceName = [](const QString& name) {
-        const QString n = name.toLower();
-        return n.contains(QStringLiteral("earpiece")) ||
-               n.contains(QStringLiteral("receiver")) ||
-               n.contains(QStringLiteral("handset"));
-    };
     auto isLikelySpeakerName = [](const QString& name) {
         const QString n = name.toLower();
         return n.contains(QStringLiteral("speaker")) ||
@@ -233,16 +227,14 @@ int main(int argc, char *argv[])
         [&audioOutput, &androidPttBridge,
          isLikelyBluetoothOutputName,
          isLikelyUsbOutputName,
-         isLikelyEarpieceName,
          isLikelySpeakerName,
          isLikelyWiredOutputName]() {
         // Must match IncomUdonActivity OUTPUT_ROUTE_* constants.
         constexpr int kRouteAuto = 0;
         constexpr int kRouteSpeaker = 1;
-        constexpr int kRouteEarpiece = 2;
-        constexpr int kRouteBluetooth = 3;
-        constexpr int kRouteUsb = 4;
-        constexpr int kRouteWired = 5;
+        constexpr int kRouteBluetooth = 2;
+        constexpr int kRouteUsb = 3;
+        constexpr int kRouteWired = 4;
 
         int route = kRouteAuto;
         const QString selectedId = audioOutput.selectedOutputDeviceId();
@@ -254,9 +246,7 @@ int main(int argc, char *argv[])
             if (idx >= 0 && idx < names.size())
             {
                 const QString name = names.at(idx);
-                if (isLikelyEarpieceName(name))
-                    route = kRouteEarpiece;
-                else if (isLikelyUsbOutputName(name))
+                if (isLikelyUsbOutputName(name))
                     route = kRouteUsb;
                 else if (isLikelyBluetoothOutputName(name))
                     route = kRouteBluetooth;
