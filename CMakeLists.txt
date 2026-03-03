@@ -21,10 +21,12 @@ qt_add_qml_module(appIncomUdon
         assets/sfx/ptt_off.wav
         assets/sfx/carrier_sense.wav
         assets/sfx/README.md
+        assets/fonts/SukimaGothic-Regular-ver11.2.ttf
         LICENSE
         THIRD_PARTY_NOTICES.md
         LICENSES/Apache-2.0.txt
         LICENSES/LGPL-2.1.txt
+        LICENSES/SIL-Open-Font-License-1.1.txt
     SOURCES
         audio/AudioInput.h
         audio/AudioInput.cpp

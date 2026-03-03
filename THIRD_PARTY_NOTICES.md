@@ -36,6 +36,12 @@ relicensed under MIT.
 - License reference:
   - https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
 
+## 4) Sukima Gothic (bundled UI font)
+
+- Project use: bundled UI font (`assets/fonts/SukimaGothic-Regular-ver11.2.ttf`).
+- License: SIL Open Font License 1.1.
+- License text copy in this repo: `LICENSES/SIL-Open-Font-License-1.1.txt`.
+
 ## Distribution Notes
 
 - This project can be distributed as MIT for original code in this repository.

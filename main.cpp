@@ -9,6 +9,8 @@
 #include <QTimer>
 #include <QTranslator>
 #include <QLocale>
+#include <QFont>
+#include <QFontDatabase>
 #include <QtEndian>
 #include <QDebug>
 #include <QStringList>
@@ -42,11 +44,40 @@ static void logCodecStatus(const QString& message)
     __android_log_print(ANDROID_LOG_WARN, "IncomUdon", "%s", utf8.constData());
 #endif
 }
+
+static QFont fixedUiFont(const QFont& base)
+{
+    QFont font(base);
+    static int s_fontId = -2;
+    if (s_fontId == -2)
+    {
+        s_fontId = QFontDatabase::addApplicationFont(
+            QStringLiteral(":/qt/qml/IncomUdon/assets/fonts/SukimaGothic-Regular-ver11.2.ttf"));
+        if (s_fontId < 0)
+        {
+            // Fallback for alternate resource prefix resolution.
+            s_fontId = QFontDatabase::addApplicationFont(
+                QStringLiteral(":/assets/fonts/SukimaGothic-Regular-ver11.2.ttf"));
+        }
+        if (s_fontId < 0)
+            qWarning("Failed to load bundled font: SukimaGothic-Regular-ver11.2.ttf");
+    }
+
+    if (s_fontId >= 0)
+    {
+        const QStringList families = QFontDatabase::applicationFontFamilies(s_fontId);
+        if (!families.isEmpty())
+            font.setFamilies(QStringList{families.constFirst()});
+    }
+
+    return font;
+}
 }
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    app.setFont(fixedUiFont(app.font()));
     QCoreApplication::setOrganizationName(QStringLiteral("FriedOudon"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("friedoudon.com"));
     QCoreApplication::setApplicationName(QStringLiteral("IncomUdon"));

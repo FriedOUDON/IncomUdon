@@ -57,9 +57,17 @@ QString LicenseProvider::combinedLicenses() const
         },
         QStringLiteral("LICENSES/LGPL-2.1.txt"));
 
+    const QString ofl = readFirstAvailable(
+        {
+            QStringLiteral(":/qt/qml/IncomUdon/LICENSES/SIL-Open-Font-License-1.1.txt"),
+            QStringLiteral(":/LICENSES/SIL-Open-Font-License-1.1.txt")
+        },
+        QStringLiteral("LICENSES/SIL-Open-Font-License-1.1.txt"));
+
     return QStringLiteral("=== App License (LICENSE) ===\n%1\n\n"
                           "=== Third Party Notices ===\n%2\n\n"
                           "=== Apache-2.0 ===\n%3\n\n"
-                          "=== LGPL-2.1 ===\n%4")
-        .arg(appLicense, notices, apache, lgpl);
+                          "=== LGPL-2.1 ===\n%4\n\n"
+                          "=== SIL Open Font License 1.1 (Sukima Gothic) ===\n%5")
+        .arg(appLicense, notices, apache, lgpl, ofl);
 }
