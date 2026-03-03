@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QCoreApplication>
 #include <QLibrary>
 #include <QMutexLocker>
 #include <QStringList>
@@ -96,31 +97,87 @@ void Codec2Wrapper::refreshOpusLibrary()
     unloadOpusLibrary();
 
     const bool explicitPath = !m_opusLibraryPath.trimmed().isEmpty();
+    QStringList loadCandidates;
     QString normalizedError;
-    const QString normalizedPath = normalizeOpusLibraryPath(m_opusLibraryPath, &normalizedError);
-    if (explicitPath && normalizedPath.isEmpty())
+    if (explicitPath)
     {
-        setOpusLibraryLoadedInternal(false);
-        if (normalizedError.isEmpty())
-            normalizedError = QStringLiteral("Invalid opus library path");
-        setOpusLibraryErrorInternal(normalizedError);
-        return;
+        const QString normalizedPath = normalizeOpusLibraryPath(m_opusLibraryPath, &normalizedError);
+        if (normalizedPath.isEmpty())
+        {
+            setOpusLibraryLoadedInternal(false);
+            if (normalizedError.isEmpty())
+                normalizedError = QStringLiteral("Invalid opus library path");
+            setOpusLibraryErrorInternal(normalizedError);
+            return;
+        }
+        loadCandidates << normalizedPath;
     }
-
-    // Runtime loading is optional and used only when user specifies a path.
-    if (!explicitPath)
+    else
     {
+#ifdef INCOMUDON_USE_OPUS_LINKED
+        // In linked builds runtime loading is optional and used only when the user
+        // specifies an explicit path.
         setOpusLibraryLoadedInternal(false);
         setOpusLibraryErrorInternal(QString());
         return;
+#else
+        // Runtime-only builds try bundled/system opus candidates automatically.
+#if defined(Q_OS_WIN)
+        const QString appDir = QCoreApplication::applicationDirPath();
+        if (!appDir.isEmpty())
+        {
+            loadCandidates << QDir(appDir).filePath(QStringLiteral("libopus.dll"))
+                           << QDir(appDir).filePath(QStringLiteral("opus.dll"));
+        }
+        loadCandidates << QStringLiteral("libopus.dll")
+                       << QStringLiteral("opus.dll");
+#elif defined(Q_OS_ANDROID)
+        const QString appDir = QCoreApplication::applicationDirPath();
+        if (!appDir.isEmpty())
+            loadCandidates << QDir(appDir).filePath(QStringLiteral("libopus.so"));
+        loadCandidates << QStringLiteral("libopus.so")
+                       << QStringLiteral("opus.so");
+#elif defined(Q_OS_MACOS) || defined(Q_OS_IOS)
+        loadCandidates << QStringLiteral("libopus.dylib")
+                       << QStringLiteral("opus.dylib");
+#else
+        loadCandidates << QStringLiteral("libopus.so")
+                       << QStringLiteral("opus.so");
+#endif
+#endif
     }
 
-    m_opusLibrary->setFileName(normalizedPath);
-    if (!m_opusLibrary->load())
+    QString loadedCandidate;
+    QString loadError;
+    for (const QString& candidate : std::as_const(loadCandidates))
+    {
+        if (candidate.trimmed().isEmpty())
+            continue;
+        m_opusLibrary->setFileName(candidate);
+        if (m_opusLibrary->load())
+        {
+            loadedCandidate = candidate;
+            break;
+        }
+        loadError = m_opusLibrary->errorString();
+    }
+
+    if (loadedCandidate.isEmpty())
     {
         setOpusLibraryLoadedInternal(false);
-        setOpusLibraryErrorInternal(QStringLiteral("Failed to load opus library: %1")
-                                        .arg(m_opusLibrary->errorString()));
+        if (explicitPath)
+        {
+            setOpusLibraryErrorInternal(QStringLiteral("Failed to load opus library: %1")
+                                            .arg(loadError));
+        }
+        else
+        {
+#ifndef INCOMUDON_USE_OPUS_LINKED
+            setOpusLibraryErrorInternal(QStringLiteral("Failed to load bundled opus runtime library"));
+#else
+            setOpusLibraryErrorInternal(QString());
+#endif
+        }
         return;
     }
 
@@ -157,7 +214,7 @@ void Codec2Wrapper::refreshOpusLibrary()
     unloadOpusLibrary();
     setOpusLibraryLoadedInternal(false);
     setOpusLibraryErrorInternal(
-        QStringLiteral("Required opus symbols were not found in: %1").arg(normalizedPath));
+        QStringLiteral("Required opus symbols were not found in: %1").arg(loadedCandidate));
 }
 #endif
 
@@ -782,16 +839,20 @@ Codec2Wrapper::~Codec2Wrapper()
     {
         if (m_opusUsingRuntimeApi && m_opusEncoderDestroy)
             m_opusEncoderDestroy(m_opusEncoder);
+#ifdef INCOMUDON_USE_OPUS_LINKED
         else
             opus_encoder_destroy(m_opusEncoder);
+#endif
         m_opusEncoder = nullptr;
     }
     if (m_opusDecoder)
     {
         if (m_opusUsingRuntimeApi && m_opusDecoderDestroy)
             m_opusDecoderDestroy(m_opusDecoder);
+#ifdef INCOMUDON_USE_OPUS_LINKED
         else
             opus_decoder_destroy(m_opusDecoder);
+#endif
         m_opusDecoder = nullptr;
     }
     m_opusUsingRuntimeApi = false;
@@ -1010,17 +1071,25 @@ QByteArray Codec2Wrapper::encode(const QByteArray& pcmFrame) const
             std::memcpy(inputSamples.data(), pcmFrame.constData(), copyBytes);
 
         QByteArray output(512, 0);
-        const int encodedBytes = (m_opusUsingRuntimeApi && m_opusEncode)
-            ? m_opusEncode(m_opusEncoder,
-                           inputSamples.constData(),
-                           expectedSamples,
-                           reinterpret_cast<unsigned char*>(output.data()),
-                           output.size())
-            : opus_encode(m_opusEncoder,
-                          inputSamples.constData(),
-                          expectedSamples,
-                          reinterpret_cast<unsigned char*>(output.data()),
-                          output.size());
+        int encodedBytes = -1;
+        if (m_opusUsingRuntimeApi && m_opusEncode)
+        {
+            encodedBytes = m_opusEncode(m_opusEncoder,
+                                        inputSamples.constData(),
+                                        expectedSamples,
+                                        reinterpret_cast<unsigned char*>(output.data()),
+                                        output.size());
+        }
+#ifdef INCOMUDON_USE_OPUS_LINKED
+        else
+        {
+            encodedBytes = opus_encode(m_opusEncoder,
+                                       inputSamples.constData(),
+                                       expectedSamples,
+                                       reinterpret_cast<unsigned char*>(output.data()),
+                                       output.size());
+        }
+#endif
         if (encodedBytes <= 0)
             return QByteArray();
         output.truncate(encodedBytes);
@@ -1075,17 +1144,10 @@ QByteArray Codec2Wrapper::decode(const QByteArray& codecFrame) const
     {
         const int expectedSamples = m_pcmFrameBytes / static_cast<int>(sizeof(opus_int16));
         QVector<opus_int16> outputSamples(expectedSamples, 0);
-        const int decodedSamples = (m_opusUsingRuntimeApi && m_opusDecode)
-            ? m_opusDecode(
-                m_opusDecoder,
-                codecFrame.isEmpty()
-                    ? nullptr
-                    : reinterpret_cast<const unsigned char*>(codecFrame.constData()),
-                codecFrame.size(),
-                outputSamples.data(),
-                expectedSamples,
-                0)
-            : opus_decode(
+        int decodedSamples = -1;
+        if (m_opusUsingRuntimeApi && m_opusDecode)
+        {
+            decodedSamples = m_opusDecode(
                 m_opusDecoder,
                 codecFrame.isEmpty()
                     ? nullptr
@@ -1094,6 +1156,21 @@ QByteArray Codec2Wrapper::decode(const QByteArray& codecFrame) const
                 outputSamples.data(),
                 expectedSamples,
                 0);
+        }
+#ifdef INCOMUDON_USE_OPUS_LINKED
+        else
+        {
+            decodedSamples = opus_decode(
+                m_opusDecoder,
+                codecFrame.isEmpty()
+                    ? nullptr
+                    : reinterpret_cast<const unsigned char*>(codecFrame.constData()),
+                codecFrame.size(),
+                outputSamples.data(),
+                expectedSamples,
+                0);
+        }
+#endif
 
         QByteArray output(m_pcmFrameBytes, 0);
         if (decodedSamples <= 0)
@@ -1160,16 +1237,20 @@ void Codec2Wrapper::updateCodec()
     {
         if (m_opusUsingRuntimeApi && m_opusEncoderDestroy)
             m_opusEncoderDestroy(m_opusEncoder);
+#ifdef INCOMUDON_USE_OPUS_LINKED
         else
             opus_encoder_destroy(m_opusEncoder);
+#endif
         m_opusEncoder = nullptr;
     }
     if (m_opusDecoder)
     {
         if (m_opusUsingRuntimeApi && m_opusDecoderDestroy)
             m_opusDecoderDestroy(m_opusDecoder);
+#ifdef INCOMUDON_USE_OPUS_LINKED
         else
             opus_decoder_destroy(m_opusDecoder);
+#endif
         m_opusDecoder = nullptr;
     }
     m_opusUsingRuntimeApi = false;
@@ -1182,8 +1263,15 @@ void Codec2Wrapper::updateCodec()
 #ifdef INCOMUDON_USE_OPUS
     if (requestOpus)
     {
-        if (!m_opusLibraryPath.trimmed().isEmpty() && !m_opusLibraryLoaded)
+        if (!m_opusLibraryLoaded)
+        {
+#ifdef INCOMUDON_USE_OPUS_LINKED
+            if (!m_opusLibraryPath.trimmed().isEmpty())
+                refreshOpusLibrary();
+#else
             refreshOpusLibrary();
+#endif
+        }
 
         const bool useRuntimeApi = m_opusLibraryLoaded &&
                                    m_opusEncoderCreate &&
@@ -1201,12 +1289,14 @@ void Codec2Wrapper::updateCodec()
             m_opusDecoder = m_opusDecoderCreate(8000, 1, &decErr);
             m_opusUsingRuntimeApi = true;
         }
+#ifdef INCOMUDON_USE_OPUS_LINKED
         else
         {
             m_opusEncoder = opus_encoder_create(8000, 1, OPUS_APPLICATION_VOIP, &encErr);
             m_opusDecoder = opus_decoder_create(8000, 1, &decErr);
             m_opusUsingRuntimeApi = false;
         }
+#endif
         if (m_opusEncoder && m_opusDecoder &&
             encErr == OPUS_OK && decErr == OPUS_OK)
         {
@@ -1219,6 +1309,7 @@ void Codec2Wrapper::updateCodec()
                 m_opusEncoderCtl(m_opusEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
                 m_opusEncoderCtl(m_opusEncoder, OPUS_SET_COMPLEXITY(5));
             }
+#ifdef INCOMUDON_USE_OPUS_LINKED
             else
             {
                 opus_encoder_ctl(m_opusEncoder, OPUS_SET_BITRATE(bitrate));
@@ -1227,6 +1318,7 @@ void Codec2Wrapper::updateCodec()
                 opus_encoder_ctl(m_opusEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
                 opus_encoder_ctl(m_opusEncoder, OPUS_SET_COMPLEXITY(5));
             }
+#endif
 
             const int targetFrameBytes = qBound(8, bitrate / 400, 512);
             if (m_frameBytes != targetFrameBytes)
@@ -1267,16 +1359,20 @@ void Codec2Wrapper::updateCodec()
         {
             if (m_opusUsingRuntimeApi && m_opusEncoderDestroy)
                 m_opusEncoderDestroy(m_opusEncoder);
+#ifdef INCOMUDON_USE_OPUS_LINKED
             else
                 opus_encoder_destroy(m_opusEncoder);
+#endif
             m_opusEncoder = nullptr;
         }
         if (m_opusDecoder)
         {
             if (m_opusUsingRuntimeApi && m_opusDecoderDestroy)
                 m_opusDecoderDestroy(m_opusDecoder);
+#ifdef INCOMUDON_USE_OPUS_LINKED
             else
                 opus_decoder_destroy(m_opusDecoder);
+#endif
             m_opusDecoder = nullptr;
         }
         m_opusUsingRuntimeApi = false;

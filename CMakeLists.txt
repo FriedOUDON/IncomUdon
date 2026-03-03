@@ -83,6 +83,7 @@ option(USE_OPUS_ANDROID_PREBUILT "Use prebuilt libopus for Android" ON)
 option(USE_OPUS_WINDOWS_PREBUILT "Use prebuilt libopus for Windows" ON)
 option(USE_OPUS_SHARED_PREBUILT "Prefer prebuilt shared libopus over static" ON)
 option(USE_OPUS_STATIC_PREBUILT_FALLBACK "Allow static libopus fallback when shared is unavailable" ON)
+option(USE_OPUS_RUNTIME_PREBUILT_FALLBACK "Allow runtime-only libopus (.dll/.so) fallback when import/static libs are unavailable" ON)
 option(INCOMUDON_CODEC2_RUNTIME_LOADER "Enable runtime libcodec2 loading from app/UI" ON)
 
 if(INCOMUDON_CODEC2_RUNTIME_LOADER)
@@ -380,7 +381,9 @@ if(ANDROID AND USE_OPUS_ANDROID_PREBUILT)
             target_include_directories(appIncomUdon PRIVATE
                 "${OPUS_ANDROID_INCLUDE}"
                 "${OPUS_ANDROID_INCLUDE}/opus")
-            target_compile_definitions(appIncomUdon PRIVATE INCOMUDON_USE_OPUS)
+            target_compile_definitions(appIncomUdon PRIVATE
+                INCOMUDON_USE_OPUS
+                INCOMUDON_USE_OPUS_LINKED=1)
             if(OPUS_ANDROID_KIND STREQUAL "SHARED")
                 get_target_property(_extra_libs appIncomUdon QT_ANDROID_EXTRA_LIBS)
                 if(NOT _extra_libs)
@@ -439,6 +442,9 @@ if(WIN32 AND USE_OPUS_WINDOWS_PREBUILT AND NOT INCOMUDON_OPUS_FOUND)
         if(EXISTS "${_root}/include")
             set(_inc "${_root}/include")
         endif()
+        if(_inc AND NOT (EXISTS "${_inc}/opus/opus.h" OR EXISTS "${_inc}/opus.h"))
+            set(_inc "")
+        endif()
 
         set(_libdir "")
         foreach(_cand IN ITEMS
@@ -455,6 +461,7 @@ if(WIN32 AND USE_OPUS_WINDOWS_PREBUILT AND NOT INCOMUDON_OPUS_FOUND)
         set(_kind "")
         set(_dll "")
         set(_implib "")
+        set(_runtime_only FALSE)
 
         if(USE_OPUS_SHARED_PREBUILT)
             foreach(_cand IN ITEMS
@@ -497,29 +504,60 @@ if(WIN32 AND USE_OPUS_WINDOWS_PREBUILT AND NOT INCOMUDON_OPUS_FOUND)
             endforeach()
         endif()
 
-        if(_inc AND _lib)
+        if(USE_OPUS_RUNTIME_PREBUILT_FALLBACK AND NOT _lib AND _dll)
+            set(_runtime_only TRUE)
+        endif()
+
+        if(_inc AND (_lib OR _runtime_only))
             add_library(incomudon_opus ${_kind} IMPORTED GLOBAL)
-            if(_kind STREQUAL "SHARED")
+            if(_runtime_only)
+                # Runtime-only fallback: compile opus paths and load libopus dynamically.
+                set_target_properties(incomudon_opus PROPERTIES
+                    IMPORTED_LOCATION "${_dll}")
+                target_include_directories(appIncomUdon PRIVATE
+                    "${_inc}"
+                    "${_inc}/opus")
+                target_compile_definitions(appIncomUdon PRIVATE INCOMUDON_USE_OPUS)
+                if(_dll)
+                    add_custom_command(TARGET appIncomUdon POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_dll}"
+                        $<TARGET_FILE_DIR:appIncomUdon>)
+                endif()
+                message(STATUS "Using Windows prebuilt libopus (RUNTIME): ${_dll}")
+                set(INCOMUDON_OPUS_FOUND TRUE)
+            elseif(_kind STREQUAL "SHARED")
                 set_target_properties(incomudon_opus PROPERTIES
                     IMPORTED_IMPLIB "${_lib}"
                     IMPORTED_LOCATION "${_dll}")
+                target_link_libraries(appIncomUdon PRIVATE incomudon_opus)
+                target_include_directories(appIncomUdon PRIVATE
+                    "${_inc}"
+                    "${_inc}/opus")
+                target_compile_definitions(appIncomUdon PRIVATE
+                    INCOMUDON_USE_OPUS
+                    INCOMUDON_USE_OPUS_LINKED=1)
+                if(_dll)
+                    add_custom_command(TARGET appIncomUdon POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_dll}"
+                        $<TARGET_FILE_DIR:appIncomUdon>)
+                endif()
+                message(STATUS "Using Windows prebuilt libopus (${_kind}): ${_lib}")
+                set(INCOMUDON_OPUS_FOUND TRUE)
             else()
                 set_target_properties(incomudon_opus PROPERTIES
                     IMPORTED_LOCATION "${_lib}")
+                target_link_libraries(appIncomUdon PRIVATE incomudon_opus)
+                target_include_directories(appIncomUdon PRIVATE
+                    "${_inc}"
+                    "${_inc}/opus")
+                target_compile_definitions(appIncomUdon PRIVATE
+                    INCOMUDON_USE_OPUS
+                    INCOMUDON_USE_OPUS_LINKED=1)
+                message(STATUS "Using Windows prebuilt libopus (${_kind}): ${_lib}")
+                set(INCOMUDON_OPUS_FOUND TRUE)
             endif()
-            target_link_libraries(appIncomUdon PRIVATE incomudon_opus)
-            target_include_directories(appIncomUdon PRIVATE
-                "${_inc}"
-                "${_inc}/opus")
-            target_compile_definitions(appIncomUdon PRIVATE INCOMUDON_USE_OPUS)
-            if(_kind STREQUAL "SHARED" AND _dll)
-                add_custom_command(TARGET appIncomUdon POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_dll}"
-                    $<TARGET_FILE_DIR:appIncomUdon>)
-            endif()
-            message(STATUS "Using Windows prebuilt libopus (${_kind}): ${_lib}")
-            set(INCOMUDON_OPUS_FOUND TRUE)
         endif()
     endforeach()
 endif()

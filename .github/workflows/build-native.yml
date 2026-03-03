@@ -83,6 +83,21 @@ jobs:
 
           windeployqt.exe --release --qmldir "$PWD/ui" --compiler-runtime (Join-Path $deployDir "appIncomUdon.exe")
 
+          # Custom codec/runtime DLLs are not always discovered by windeployqt.
+          $customDllCandidates = @(
+            (Join-Path $PWD "build/libopus.dll"),
+            (Join-Path $PWD "build/opus.dll"),
+            (Join-Path $PWD "third_party/libopus_windows/mingw64/lib/libopus.dll"),
+            (Join-Path $PWD "third_party/libopus_windows/x64/lib/libopus.dll"),
+            (Join-Path $PWD "third_party/libopus_windows/win64/lib/libopus.dll")
+          )
+          foreach ($cand in $customDllCandidates) {
+            if (Test-Path $cand) {
+              Copy-Item $cand $deployDir -Force
+              Write-Host "Copied custom runtime DLL: $cand"
+            }
+          }
+
           # OpenSSL DLLs are not always deployed by windeployqt.
           $opensslDlls = @("libcrypto-3-x64.dll", "libssl-3-x64.dll")
           $pathDirs = $env:PATH -split ';'
