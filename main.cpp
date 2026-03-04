@@ -268,24 +268,33 @@ int main(int argc, char *argv[])
         constexpr int kRouteWired = 4;
 
         int route = kRouteAuto;
+        QString selectedName;
         const QString selectedId = audioOutput.selectedOutputDeviceId();
+        const QStringList ids = audioOutput.outputDeviceIds();
+        const QStringList names = audioOutput.outputDeviceNames();
         if (!selectedId.isEmpty())
         {
-            const QStringList ids = audioOutput.outputDeviceIds();
-            const QStringList names = audioOutput.outputDeviceNames();
             const int idx = ids.indexOf(selectedId);
             if (idx >= 0 && idx < names.size())
-            {
-                const QString name = names.at(idx);
-                if (isLikelyUsbOutputName(name))
-                    route = kRouteUsb;
-                else if (isLikelyBluetoothOutputName(name))
-                    route = kRouteBluetooth;
-                else if (isLikelyWiredOutputName(name))
-                    route = kRouteWired;
-                else if (isLikelySpeakerName(name))
-                    route = kRouteSpeaker;
-            }
+                selectedName = names.at(idx);
+        }
+        else if (!names.isEmpty())
+        {
+            // "System default (...)" is index 0. Keep AUTO unless external route
+            // is clearly active, so Android can switch back when BT is disconnected.
+            selectedName = names.at(0);
+        }
+
+        if (!selectedName.isEmpty())
+        {
+            if (isLikelyUsbOutputName(selectedName))
+                route = kRouteUsb;
+            else if (isLikelyBluetoothOutputName(selectedName))
+                route = kRouteBluetooth;
+            else if (isLikelyWiredOutputName(selectedName))
+                route = kRouteWired;
+            else if (!selectedId.isEmpty() && isLikelySpeakerName(selectedName))
+                route = kRouteSpeaker;
         }
         androidPttBridge.setPreferredOutputRoute(route);
     };

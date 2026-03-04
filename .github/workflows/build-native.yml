@@ -150,10 +150,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          IOS_SIM_ARCH="$(uname -m)"
-          if [ "$IOS_SIM_ARCH" != "arm64" ] && [ "$IOS_SIM_ARCH" != "x86_64" ]; then
-            IOS_SIM_ARCH="arm64"
-          fi
+          IOS_SIM_ARCH="x86_64"
           echo "Using iOS simulator arch: $IOS_SIM_ARCH"
           qt-cmake -S . -B build-ios -G Xcode \
             -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} \
@@ -165,7 +162,16 @@ jobs:
             ${{ env.CMAKE_COMMON_ARGS }}
 
       - name: Build
-        run: cmake --build build-ios --config ${{ env.CMAKE_BUILD_TYPE }} --target appIncomUdon --parallel --verbose
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG_FILE="$PWD/build-ios/build-ios.log"
+          if ! cmake --build build-ios --config ${{ env.CMAKE_BUILD_TYPE }} --target appIncomUdon --parallel --verbose 2>&1 | tee "$LOG_FILE"; then
+            echo "==== iOS Linker Diagnostics ===="
+            grep -n -A 80 -B 20 "Undefined symbols for architecture" "$LOG_FILE" || true
+            grep -n -A 20 -B 20 -E "ld: error:|clang\\+\\+: error:|building for iOS Simulator, but linking in object file built for iOS" "$LOG_FILE" || true
+            exit 1
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
