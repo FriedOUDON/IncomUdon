@@ -72,7 +72,7 @@ Window {
         property url pttOffSoundUrl: defaultPttOffSoundUrl
         property url carrierSenseSoundUrl: defaultCarrierSenseSoundUrl
         property int cueVolumePercent: 50
-        property bool pttOnSoundEnabled: false
+        property bool pttOnSoundEnabled: true
         property bool pttOffSoundEnabled: true
         property bool carrierSenseSoundEnabled: true
         property string cuePickerTarget: ""
@@ -98,7 +98,7 @@ Window {
         property bool suppressForcePcmPersistence: false
         property var passwordInputItem: null
         property var cueAudioDevice: cueMediaDevices.defaultAudioOutput
-        property string codec2DownloadUrl: "https://github.com/FriedOUDON/libcodec2/releases/tag/v1.0.2"
+        property string codec2DownloadUrl: "https://github.com/FriedOUDON/libcodec2/releases/tag/v1.2.4"
         property string licensesText: ""
         readonly property real _pxPerDp: Math.max(1.0, Screen.pixelDensity * 25.4 / 160.0)
         readonly property int _androidTopInsetFallback: Qt.platform.os === "android" ? Math.round(28 * _pxPerDp) : 0
@@ -497,7 +497,7 @@ Window {
             property int speakerVolumePercent: 100
             property bool keepMicSessionAlwaysOn: false
             property int cueVolumePercent: 50
-            property bool pttOnSoundEnabled: false
+            property bool pttOnSoundEnabled: true
             property bool pttOffSoundEnabled: true
             property bool carrierSenseSoundEnabled: true
             property string pttOnSoundUrl: ""
