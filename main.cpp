@@ -458,14 +458,26 @@ int main(int argc, char *argv[])
 
     auto syncAudioInputToCodec = [&codecTx, &audioInput]() {
         const int pcmBytes = codecTx.pcmFrameBytes();
+        const int sampleRate = codecTx.sampleRate();
         const int frameMs = codecTx.frameMs();
-        if (pcmBytes > 0)
+        if (sampleRate > 0)
         {
-            audioInput.setFrameBytes(pcmBytes);
+            audioInput.setSampleRate(sampleRate);
         }
         if (frameMs > 0)
         {
             audioInput.setIntervalMs(frameMs);
+        }
+        if (pcmBytes > 0)
+        {
+            audioInput.setFrameBytes(pcmBytes);
+        }
+    };
+    auto syncAudioOutputToCodec = [&codecRx, &audioOutput]() {
+        const int sampleRate = codecRx.sampleRate();
+        if (sampleRate > 0)
+        {
+            audioOutput.setSampleRate(sampleRate);
         }
     };
     auto applyCodecBitrate = [&codecTx, &appState, &syncAudioInputToCodec]() {
@@ -523,8 +535,12 @@ int main(int argc, char *argv[])
     });
     QObject::connect(&codecTx, &Codec2Wrapper::pcmFrameBytesChanged,
                      &appState, syncAudioInputToCodec);
+    QObject::connect(&codecTx, &Codec2Wrapper::sampleRateChanged,
+                     &appState, syncAudioInputToCodec);
     QObject::connect(&codecTx, &Codec2Wrapper::frameMsChanged,
                      &appState, syncAudioInputToCodec);
+    QObject::connect(&codecRx, &Codec2Wrapper::sampleRateChanged,
+                     &appState, syncAudioOutputToCodec);
 
     QObject::connect(&appState, &AppState::codecBitrateChanged,
                      &appState, [&applyCodecBitrate, &codecTx]() {
@@ -1034,6 +1050,8 @@ int main(int argc, char *argv[])
     codecTx.setForcePcm(appState.forcePcm());
     codecRx.setMode(appState.codecBitrate());
     codecRx.setForcePcm(appState.forcePcm());
+    syncAudioInputToCodec();
+    syncAudioOutputToCodec();
     audioInput.setInputGainPercent(appState.micVolumePercent());
     audioInput.setNoiseSuppressionEnabled(appState.noiseSuppressionEnabled());
     audioInput.setNoiseSuppressionLevel(appState.noiseSuppressionLevel());

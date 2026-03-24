@@ -118,14 +118,51 @@ int AudioInput::intervalMs() const
     return m_intervalMs;
 }
 
+int AudioInput::sampleRate() const
+{
+    return m_sampleRate;
+}
+
 void AudioInput::setIntervalMs(int ms)
 {
-    if (m_intervalMs == ms)
+    const int normalized = qMax(5, ms);
+    if (m_intervalMs == normalized)
         return;
 
-    m_intervalMs = ms;
+    m_intervalMs = normalized;
     updateFormat();
     emit intervalMsChanged();
+    if (m_wantRunning)
+    {
+        clearSource();
+        if (m_running)
+        {
+            m_running = false;
+            emit runningChanged();
+        }
+        scheduleRestart(30);
+    }
+}
+
+void AudioInput::setSampleRate(int sampleRate)
+{
+    const int normalized = qMax(8000, sampleRate);
+    if (m_sampleRate == normalized)
+        return;
+
+    m_sampleRate = normalized;
+    updateFormat();
+    emit sampleRateChanged();
+    if (m_wantRunning)
+    {
+        clearSource();
+        if (m_running)
+        {
+            m_running = false;
+            emit runningChanged();
+        }
+        scheduleRestart(30);
+    }
 }
 
 bool AudioInput::isRunning() const
@@ -370,7 +407,7 @@ void AudioInput::onReadyRead()
 void AudioInput::updateFormat()
 {
     QAudioFormat format;
-    format.setSampleRate(8000);
+    format.setSampleRate(m_sampleRate);
     format.setChannelCount(1);
     format.setSampleFormat(QAudioFormat::Int16);
     m_format = format;

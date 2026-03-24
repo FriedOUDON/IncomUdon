@@ -928,6 +928,12 @@ int Codec2Wrapper::pcmFrameBytes() const
     return m_pcmFrameBytes;
 }
 
+int Codec2Wrapper::sampleRate() const
+{
+    QMutexLocker<QRecursiveMutex> locker(&m_mutex);
+    return m_sampleRate;
+}
+
 int Codec2Wrapper::frameMs() const
 {
     QMutexLocker<QRecursiveMutex> locker(&m_mutex);
@@ -1283,31 +1289,33 @@ void Codec2Wrapper::updateCodec()
                                    m_opusEncoderCtl;
         int encErr = 0;
         int decErr = 0;
+        const int bitrate = opusBitrateForMode(m_mode);
+        const int pcmSampleRate = opusPcmSampleRateForMode(m_mode);
         if (useRuntimeApi)
         {
-            m_opusEncoder = m_opusEncoderCreate(8000, 1, OPUS_APPLICATION_VOIP, &encErr);
-            m_opusDecoder = m_opusDecoderCreate(8000, 1, &decErr);
+            m_opusEncoder = m_opusEncoderCreate(pcmSampleRate, 1, OPUS_APPLICATION_VOIP, &encErr);
+            m_opusDecoder = m_opusDecoderCreate(pcmSampleRate, 1, &decErr);
             m_opusUsingRuntimeApi = true;
         }
 #ifdef INCOMUDON_USE_OPUS_LINKED
         else
         {
-            m_opusEncoder = opus_encoder_create(8000, 1, OPUS_APPLICATION_VOIP, &encErr);
-            m_opusDecoder = opus_decoder_create(8000, 1, &decErr);
+            m_opusEncoder = opus_encoder_create(pcmSampleRate, 1, OPUS_APPLICATION_VOIP, &encErr);
+            m_opusDecoder = opus_decoder_create(pcmSampleRate, 1, &decErr);
             m_opusUsingRuntimeApi = false;
         }
 #endif
         if (m_opusEncoder && m_opusDecoder &&
             encErr == OPUS_OK && decErr == OPUS_OK)
         {
-            const int bitrate = opusBitrateForMode(m_mode);
+            constexpr int kOpusFrameMs = 20;
             if (m_opusUsingRuntimeApi && m_opusEncoderCtl)
             {
                 m_opusEncoderCtl(m_opusEncoder, OPUS_SET_BITRATE(bitrate));
                 m_opusEncoderCtl(m_opusEncoder, OPUS_SET_VBR(0));
                 m_opusEncoderCtl(m_opusEncoder, OPUS_SET_DTX(0));
                 m_opusEncoderCtl(m_opusEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
-                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_COMPLEXITY(5));
+                m_opusEncoderCtl(m_opusEncoder, OPUS_SET_COMPLEXITY(10));
             }
 #ifdef INCOMUDON_USE_OPUS_LINKED
             else
@@ -1316,24 +1324,31 @@ void Codec2Wrapper::updateCodec()
                 opus_encoder_ctl(m_opusEncoder, OPUS_SET_VBR(0));
                 opus_encoder_ctl(m_opusEncoder, OPUS_SET_DTX(0));
                 opus_encoder_ctl(m_opusEncoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
-                opus_encoder_ctl(m_opusEncoder, OPUS_SET_COMPLEXITY(5));
+                opus_encoder_ctl(m_opusEncoder, OPUS_SET_COMPLEXITY(10));
             }
 #endif
 
             const int targetFrameBytes = qBound(8, bitrate / 400, 512);
+            const int targetPcmFrameBytes =
+                (pcmSampleRate * kOpusFrameMs * static_cast<int>(sizeof(opus_int16))) / 1000;
             if (m_frameBytes != targetFrameBytes)
             {
                 m_frameBytes = targetFrameBytes;
                 emit frameBytesChanged();
             }
-            if (m_pcmFrameBytes != 320)
+            if (m_pcmFrameBytes != targetPcmFrameBytes)
             {
-                m_pcmFrameBytes = 320;
+                m_pcmFrameBytes = targetPcmFrameBytes;
                 emit pcmFrameBytesChanged();
             }
-            if (m_frameMs != 20)
+            if (m_sampleRate != pcmSampleRate)
             {
-                m_frameMs = 20;
+                m_sampleRate = pcmSampleRate;
+                emit sampleRateChanged();
+            }
+            if (m_frameMs != kOpusFrameMs)
+            {
+                m_frameMs = kOpusFrameMs;
                 emit frameMsChanged();
             }
             if (!m_opusActive)
@@ -1349,10 +1364,11 @@ void Codec2Wrapper::updateCodec()
             return;
         }
 
-        logCodec2Status("Opus init failed encErr=%d decErr=%d (requested bitrate=%d path=%s loaded=%d).",
+        logCodec2Status("Opus init failed encErr=%d decErr=%d (requested bitrate=%d sampleRate=%d path=%s loaded=%d).",
                         encErr,
                         decErr,
-                        m_mode,
+                        bitrate,
+                        pcmSampleRate,
                         m_opusLibraryPath.toUtf8().constData(),
                         m_opusLibraryLoaded ? 1 : 0);
         if (m_opusEncoder)
@@ -1788,6 +1804,11 @@ void Codec2Wrapper::updateCodec()
                         m_pcmFrameBytes = newPcmBytes;
                         emit pcmFrameBytesChanged();
                     }
+                    if (m_sampleRate != 8000)
+                    {
+                        m_sampleRate = 8000;
+                        emit sampleRateChanged();
+                    }
                     if (m_frameMs != newFrameMs && newFrameMs > 0)
                     {
                         m_frameMs = newFrameMs;
@@ -1837,6 +1858,11 @@ void Codec2Wrapper::updateCodec()
         m_frameBytes = m_pcmFrameBytes;
         emit frameBytesChanged();
     }
+    if (m_sampleRate != 8000)
+    {
+        m_sampleRate = 8000;
+        emit sampleRateChanged();
+    }
     if (m_frameMs != 20)
     {
         m_frameMs = 20;
@@ -1879,6 +1905,11 @@ int Codec2Wrapper::opusBitrateForMode(int mode) const
         }
     }
     return best;
+}
+
+int Codec2Wrapper::opusPcmSampleRateForMode(int mode) const
+{
+    return opusBitrateForMode(mode) >= 12000 ? 16000 : 8000;
 }
 
 #ifdef INCOMUDON_USE_CODEC2

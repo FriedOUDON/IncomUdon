@@ -936,6 +936,12 @@ set_target_properties(appIncomUdon PROPERTIES
     WIN32_EXECUTABLE TRUE
 )
 
+if(WIN32)
+    set_target_properties(appIncomUdon PROPERTIES
+        OUTPUT_NAME "IncomUdon"
+    )
+endif()
+
 if(ANDROID)
     if(CMAKE_HOST_WIN32)
         # Keep androiddeployqt output folder as short as possible on Windows.

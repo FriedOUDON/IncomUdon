@@ -25,6 +25,10 @@ class AudioInput : public QObject
                READ intervalMs
                WRITE setIntervalMs
                NOTIFY intervalMsChanged)
+    Q_PROPERTY(int sampleRate
+               READ sampleRate
+               WRITE setSampleRate
+               NOTIFY sampleRateChanged)
     Q_PROPERTY(bool running
                READ isRunning
                NOTIFY runningChanged)
@@ -55,6 +59,8 @@ public:
 
     int intervalMs() const;
     void setIntervalMs(int ms);
+    int sampleRate() const;
+    void setSampleRate(int sampleRate);
 
     bool isRunning() const;
     int inputGainPercent() const;
@@ -76,6 +82,7 @@ signals:
     void frameReady(const QByteArray& pcmFrame);
     void frameBytesChanged();
     void intervalMsChanged();
+    void sampleRateChanged();
     void runningChanged();
     void microphonePermissionDenied();
     void inputDevicesChanged();
@@ -111,6 +118,7 @@ private:
     QMediaDevices* m_mediaDevices = nullptr;
     int m_frameBytes = 320;
     int m_intervalMs = 20;
+    int m_sampleRate = 8000;
     int m_inputGainPercent = 200;
     bool m_noiseSuppressionEnabled = false;
     int m_noiseSuppressionLevel = 45;

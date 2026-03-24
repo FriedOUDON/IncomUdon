@@ -486,7 +486,7 @@ Window {
             property int codecSelection: 0
             property int codecBitrate: 1600
             property int codec2Bitrate: 1600
-            property int opusBitrate: 8000
+            property int opusBitrate: 16000
             property bool forcePcm: true
             property bool txFecEnabled: true
             property bool qosEnabled: true

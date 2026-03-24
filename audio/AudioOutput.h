@@ -31,6 +31,10 @@ class AudioOutput : public QObject
                READ selectedOutputDeviceId
                WRITE setSelectedOutputDeviceId
                NOTIFY selectedOutputDeviceIdChanged)
+    Q_PROPERTY(int sampleRate
+               READ sampleRate
+               WRITE setSampleRate
+               NOTIFY sampleRateChanged)
 
 public:
     explicit AudioOutput(QObject* parent = nullptr);
@@ -43,6 +47,8 @@ public:
     QStringList outputDeviceIds() const;
     QString selectedOutputDeviceId() const;
     void setSelectedOutputDeviceId(const QString& deviceId);
+    int sampleRate() const;
+    void setSampleRate(int sampleRate);
 
 public slots:
     void playFrame(const QByteArray& pcmFrame);
@@ -52,6 +58,7 @@ signals:
     void lastFrameBytesChanged();
     void outputDevicesChanged();
     void selectedOutputDeviceIdChanged();
+    void sampleRateChanged();
 
 private:
     void resetOutputSink();
@@ -87,6 +94,7 @@ private:
     QStringList m_outputDeviceNames;
     QStringList m_outputDeviceIds;
     QString m_selectedOutputDeviceId;
+    int m_sampleRate = 8000;
     int m_outputFrameBytes = 2;
     int m_pendingSoftLimitBytes = 0;
     int m_pendingHardLimitBytes = 0;

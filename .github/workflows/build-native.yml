@@ -75,13 +75,13 @@ jobs:
           $deployDir = Join-Path $PWD "dist/windows"
           New-Item -ItemType Directory -Path $deployDir -Force | Out-Null
 
-          $exe = Join-Path $PWD "build/appIncomUdon.exe"
+          $exe = Join-Path $PWD "build/IncomUdon.exe"
           if (-not (Test-Path $exe)) {
             throw "Executable not found: $exe"
           }
-          Copy-Item $exe (Join-Path $deployDir "appIncomUdon.exe") -Force
+          Copy-Item $exe (Join-Path $deployDir "IncomUdon.exe") -Force
 
-          windeployqt.exe --release --qmldir "$PWD/ui" --compiler-runtime (Join-Path $deployDir "appIncomUdon.exe")
+          windeployqt.exe --release --qmldir "$PWD/ui" --compiler-runtime (Join-Path $deployDir "IncomUdon.exe")
 
           # Custom codec/runtime DLLs are not always discovered by windeployqt.
           $customDllCandidates = @(

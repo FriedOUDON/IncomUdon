@@ -28,6 +28,9 @@ class Codec2Wrapper : public QObject
     Q_PROPERTY(int pcmFrameBytes
                READ pcmFrameBytes
                NOTIFY pcmFrameBytesChanged)
+    Q_PROPERTY(int sampleRate
+               READ sampleRate
+               NOTIFY sampleRateChanged)
     Q_PROPERTY(int frameMs
                READ frameMs
                NOTIFY frameMsChanged)
@@ -81,6 +84,7 @@ public:
     void setFrameBytes(int bytes);
 
     int pcmFrameBytes() const;
+    int sampleRate() const;
     int frameMs() const;
     bool forcePcm() const;
     void setForcePcm(bool force);
@@ -104,6 +108,7 @@ signals:
     void modeChanged();
     void frameBytesChanged();
     void pcmFrameBytesChanged();
+    void sampleRateChanged();
     void frameMsChanged();
     void forcePcmChanged();
     void codec2ActiveChanged();
@@ -119,12 +124,14 @@ private:
     void updateCodec();
     int normalizeMode(int mode) const;
     int opusBitrateForMode(int mode) const;
+    int opusPcmSampleRateForMode(int mode) const;
 
     mutable QRecursiveMutex m_mutex;
     int m_codecType = CodecTypeCodec2;
     int m_mode = 1600;
     int m_frameBytes = 160;
     int m_pcmFrameBytes = 320;
+    int m_sampleRate = 8000;
     int m_frameMs = 20;
     bool m_forcePcm = false;
     bool m_codec2Active = false;

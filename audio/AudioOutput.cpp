@@ -155,7 +155,7 @@ static QByteArray fromMonoInt16(const QVector<qint16>& samples, const QAudioForm
 AudioOutput::AudioOutput(QObject* parent)
     : QObject(parent)
 {
-    m_format.setSampleRate(8000);
+    m_format.setSampleRate(m_sampleRate);
     m_format.setChannelCount(1);
     m_format.setSampleFormat(QAudioFormat::Int16);
 
@@ -228,6 +228,11 @@ QString AudioOutput::selectedOutputDeviceId() const
     return m_selectedOutputDeviceId;
 }
 
+int AudioOutput::sampleRate() const
+{
+    return m_sampleRate;
+}
+
 void AudioOutput::setSelectedOutputDeviceId(const QString& deviceId)
 {
     const QString normalized = deviceId.trimmed();
@@ -236,6 +241,22 @@ void AudioOutput::setSelectedOutputDeviceId(const QString& deviceId)
 
     m_selectedOutputDeviceId = normalized;
     emit selectedOutputDeviceIdChanged();
+    if (m_sink || m_device)
+    {
+        resetOutputSink();
+        ensureStarted();
+    }
+}
+
+void AudioOutput::setSampleRate(int sampleRate)
+{
+    const int normalized = qMax(8000, sampleRate);
+    if (m_sampleRate == normalized)
+        return;
+
+    m_sampleRate = normalized;
+    m_format.setSampleRate(m_sampleRate);
+    emit sampleRateChanged();
     if (m_sink || m_device)
     {
         resetOutputSink();
