@@ -1558,8 +1558,9 @@ Window {
                 anchors.fill: parent
 
                 Flickable {
+                    id: pageBFlick
                     anchors.fill: parent
-                    contentWidth: Math.max(width, centeredSettings.width)
+                    contentWidth: width
                     contentHeight: centeredSettings.height + 20
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
@@ -1570,12 +1571,12 @@ Window {
 
                     Item {
                         id: centeredSettings
-                        width: parent.width
+                        width: pageBFlick.width
                         height: contentColumn.height
 
                         Column {
                             id: contentColumn
-                            width: parent.width
+                            width: centeredSettings.width
                             spacing: 10
 
                             Text {
