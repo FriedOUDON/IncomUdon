@@ -100,6 +100,7 @@ Window {
         property var cueAudioDevice: cueMediaDevices.defaultAudioOutput
         property string codec2DownloadUrl: "https://github.com/FriedOUDON/libcodec2/releases/tag/v1.2.4"
         property string licensesText: ""
+        readonly property bool hideWindowScrollBars: Qt.platform.os === "windows"
         readonly property real _pxPerDp: Math.max(1.0, Screen.pixelDensity * 25.4 / 160.0)
         readonly property int _androidTopInsetFallback: Qt.platform.os === "android" ? Math.round(28 * _pxPerDp) : 0
         readonly property int _androidBottomInsetFallback: Qt.platform.os === "android" ? Math.round(56 * _pxPerDp) : 0
@@ -1063,6 +1064,7 @@ Window {
 
             contentItem: ScrollView {
                 clip: true
+                ScrollBar.vertical.policy: root.hideWindowScrollBars ? ScrollBar.AlwaysOff : ScrollBar.AsNeeded
                 TextArea {
                     readOnly: true
                     wrapMode: TextEdit.WrapAnywhere
@@ -1091,15 +1093,21 @@ Window {
                     id: tabs
                     width: parent.width - menuButton.width - tabRow.spacing
                     font.family: Qt.application.font.family
-                    onCurrentIndexChanged: persisted.pageIndex = currentIndex
+                    focusPolicy: Qt.NoFocus
+                    onCurrentIndexChanged: {
+                        persisted.pageIndex = currentIndex
+                        root.forceActiveFocus(Qt.MouseFocusReason)
+                    }
 
                     TabButton {
                         text: qsTr("Talk")
                         font.family: tabs.font.family
+                        focusPolicy: Qt.NoFocus
                     }
                     TabButton {
                         text: qsTr("Settings")
                         font.family: tabs.font.family
+                        focusPolicy: Qt.NoFocus
                     }
                 }
 
@@ -1109,6 +1117,7 @@ Window {
                     height: tabs.height
                     text: "\u22EE"
                     font.pixelSize: 20
+                    focusPolicy: Qt.NoFocus
                     palette.buttonText: "#2b2b2b"
                     background: Rectangle {
                         color: "#ffffff"
@@ -1207,7 +1216,9 @@ Window {
                     contentHeight: pageAContent.height + 8
                     boundsBehavior: Flickable.StopAtBounds
 
-                    ScrollBar.vertical: ScrollBar { }
+                    ScrollBar.vertical: ScrollBar {
+                        visible: !root.hideWindowScrollBars
+                    }
 
                     Item {
                         id: pageAContent
@@ -1553,7 +1564,9 @@ Window {
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
 
-                    ScrollBar.vertical: ScrollBar { }
+                    ScrollBar.vertical: ScrollBar {
+                        visible: !root.hideWindowScrollBars
+                    }
 
                     Item {
                         id: centeredSettings
