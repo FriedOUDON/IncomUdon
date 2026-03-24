@@ -1039,6 +1039,7 @@ int main(int argc, char *argv[])
     pttController.setFecEnabled(appState.fecEnabled());
     pttController.setAlwaysKeepInputSession(appState.keepMicSessionAlwaysOn());
 
+    applyCodecSelection();
     applyCodecBitrate();
     codecTx.setCodec2LibraryPath(appState.codec2LibraryPath());
     codecRx.setCodec2LibraryPath(appState.codec2LibraryPath());
@@ -1046,8 +1047,11 @@ int main(int argc, char *argv[])
     codecTx.setOpusLibraryPath(appState.opusLibraryPath());
     codecRx.setOpusLibraryPath(appState.opusLibraryPath());
     syncOpusLibraryState();
-    applyCodecSelection();
     codecTx.setForcePcm(appState.forcePcm());
+    if (appState.codecSelection() == AppState::CodecOpus)
+        codecRx.setCodecType(Codec2Wrapper::CodecTypeOpus);
+    else
+        codecRx.setCodecType(Codec2Wrapper::CodecTypeCodec2);
     codecRx.setMode(appState.codecBitrate());
     codecRx.setForcePcm(appState.forcePcm());
     syncAudioInputToCodec();

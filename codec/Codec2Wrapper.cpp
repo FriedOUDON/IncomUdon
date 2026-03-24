@@ -1872,6 +1872,10 @@ void Codec2Wrapper::updateCodec()
 
 int Codec2Wrapper::normalizeMode(int mode) const
 {
+#ifdef INCOMUDON_USE_OPUS
+    if (m_codecType == CodecTypeOpus)
+        return opusBitrateForMode(mode);
+#endif
     const int options[] = {450, 700, 1600, 2400, 3200};
     int best = options[0];
     int bestDiff = qAbs(mode - options[0]);
