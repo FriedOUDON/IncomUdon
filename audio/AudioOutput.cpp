@@ -304,6 +304,10 @@ void AudioOutput::ensureStarted()
 
 #ifdef Q_OS_ANDROID
     const int targetBufferMs = 160;
+#elif defined(Q_OS_WINDOWS)
+    // WASAPI playback timing is less stable than mobile here; keep a little
+    // more queued audio to avoid intermittent underruns.
+    const int targetBufferMs = 120;
 #else
     const int targetBufferMs = 80;
 #endif

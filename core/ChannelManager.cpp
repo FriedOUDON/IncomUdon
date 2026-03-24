@@ -621,6 +621,10 @@ void ChannelManager::updatePlayoutParams()
     int targetBufferMs = 80;
 #ifdef Q_OS_ANDROID
     targetBufferMs = 160;
+#elif defined(Q_OS_WINDOWS)
+    // Windows desktop needs a slightly deeper playout cushion to avoid
+    // intermittent receive gaps from scheduler jitter.
+    targetBufferMs = 120;
 #endif
     if (m_codec && m_codec->forcePcm() && !m_fecEnabled)
     {
