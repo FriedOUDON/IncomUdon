@@ -305,28 +305,33 @@ public class IncomUdonActivity extends QtActivity {
     }
 
     private boolean shouldUseCommunicationMode() {
+        final boolean bluetoothAvailable = hasBluetoothRouteActive();
+        if (!bluetoothAvailable) {
+            return false;
+        }
         if (mPreferCommunicationMode) {
             return true;
         }
-        if (mPreferredOutputRoute == OUTPUT_ROUTE_BLUETOOTH ||
-            mPreferredOutputRoute == OUTPUT_ROUTE_USB ||
-            mPreferredOutputRoute == OUTPUT_ROUTE_WIRED) {
+        if (mPreferredOutputRoute == OUTPUT_ROUTE_BLUETOOTH) {
             return true;
         }
         if (mPreferredOutputRoute == OUTPUT_ROUTE_AUTO) {
-            return hasBluetoothRouteActive();
+            return true;
         }
         return false;
     }
 
     private boolean shouldUseBluetoothSco() {
+        if (!hasBluetoothRouteActive()) {
+            return false;
+        }
         if (mPreferredOutputRoute == OUTPUT_ROUTE_BLUETOOTH) {
             return true;
         }
         if (mPreferredOutputRoute == OUTPUT_ROUTE_AUTO) {
-            return hasBluetoothRouteActive();
+            return true;
         }
-        return false;
+        return mPreferCommunicationMode;
     }
 
     private void applySpeakerphonePreference() {
