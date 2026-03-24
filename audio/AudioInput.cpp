@@ -282,7 +282,13 @@ void AudioInput::start()
     m_noiseGateGain = 1.0f;
 
     m_source = new QAudioSource(device, m_deviceFormat, this);
-    m_source->setBufferSize(m_frameBytes * 4);
+    const int deviceBytesPerSample = m_deviceFormat.bytesPerSample();
+    const int deviceChannels = qMax(1, m_deviceFormat.channelCount());
+    const int deviceFrameBytes = (deviceBytesPerSample > 0)
+        ? ((m_deviceFormat.sampleRate() * deviceChannels *
+            deviceBytesPerSample * m_intervalMs) / 1000)
+        : 0;
+    m_source->setBufferSize(qMax(4096, deviceFrameBytes * 4));
     connect(m_source, &QAudioSource::stateChanged,
             this, &AudioInput::onSourceStateChanged);
     m_device = m_source->start();

@@ -11,8 +11,14 @@ public:
     void push(const QVector<qint16>& input, QVector<qint16>& output);
 
 private:
+    double sampleAt(double position) const;
+    static double sinc(double x);
+
     int m_inRate = 8000;
     int m_outRate = 8000;
     double m_pos = 0.0;
     QVector<qint16> m_cache;
+    int m_tapCount = 32;
+    int m_halfTaps = 16;
+    double m_cutoff = 1.0;
 };
