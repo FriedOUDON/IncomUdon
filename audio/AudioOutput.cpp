@@ -168,6 +168,10 @@ AudioOutput::AudioOutput(QObject* parent)
     connect(&m_keepAliveTimer, &QTimer::timeout,
             this, &AudioOutput::onKeepAliveTick);
 
+    m_restartTimer.setSingleShot(true);
+    connect(&m_restartTimer, &QTimer::timeout,
+            this, &AudioOutput::onRestartTimeout);
+
 #ifdef Q_OS_ANDROID
     m_devicePollTimer.setInterval(1200);
     connect(&m_devicePollTimer, &QTimer::timeout,
@@ -323,6 +327,8 @@ void AudioOutput::ensureStarted()
 
     m_sink = new QAudioSink(device, m_deviceFormat, this);
     m_sink->setBufferSize(qMax(4096, targetBufferBytes));
+    connect(m_sink, &QAudioSink::stateChanged,
+            this, &AudioOutput::onSinkStateChanged);
     m_device = m_sink->start();
     m_activeOutputDeviceId = device.id();
     if (!m_device)
@@ -359,14 +365,25 @@ void AudioOutput::resetOutputSink()
 {
     if (m_sink)
     {
+        m_resettingSink = true;
         m_sink->stop();
         m_sink->deleteLater();
         m_sink = nullptr;
+        m_resettingSink = false;
     }
     m_device = nullptr;
     m_activeOutputDeviceId.clear();
     m_pendingOutput.clear();
     m_resampler.reset();
+}
+
+void AudioOutput::scheduleRestart(int delayMs)
+{
+    if (m_restartScheduled && m_restartTimer.isActive())
+        return;
+
+    m_restartScheduled = true;
+    m_restartTimer.start(qMax(50, delayMs));
 }
 
 void AudioOutput::onAudioOutputsChanged()
@@ -431,6 +448,38 @@ void AudioOutput::onKeepAliveTick()
     flushPending();
 }
 
+void AudioOutput::onRestartTimeout()
+{
+    m_restartScheduled = false;
+    resetOutputSink();
+    ensureStarted();
+    flushPending();
+}
+
+void AudioOutput::onSinkStateChanged(QAudio::State state)
+{
+    if (!m_sink || m_resettingSink)
+        return;
+
+    if (state == QAudio::IdleState)
+    {
+        if (!m_pendingOutput.isEmpty())
+            flushPending();
+        return;
+    }
+
+    if (state != QAudio::StoppedState)
+        return;
+
+    const QtAudio::Error err = m_sink->error();
+    if (err == QtAudio::NoError)
+        return;
+
+    qWarning("Audio output stopped with error=%d, scheduling restart=1",
+             static_cast<int>(err));
+    scheduleRestart(80);
+}
+
 void AudioOutput::flushPending()
 {
     if (!m_device || !m_sink || m_pendingOutput.isEmpty())
@@ -448,7 +497,16 @@ void AudioOutput::flushPending()
 
         const qint64 written = m_device->write(m_pendingOutput.constData(), chunk);
         if (written <= 0)
+        {
+            if (m_sink->state() == QAudio::StoppedState &&
+                m_sink->error() != QtAudio::NoError)
+            {
+                qWarning("Audio output write failed in stopped state error=%d",
+                         static_cast<int>(m_sink->error()));
+                scheduleRestart(80);
+            }
             break;
+        }
 
         m_pendingOutput.remove(0, static_cast<int>(written));
         m_lastWrite.restart();

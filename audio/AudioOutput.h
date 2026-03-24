@@ -56,9 +56,12 @@ signals:
 private:
     void resetOutputSink();
     void ensureStarted();
+    void scheduleRestart(int delayMs);
     void onKeepAliveTick();
     void onAudioOutputsChanged();
     void onDevicePollTick();
+    void onRestartTimeout();
+    void onSinkStateChanged(QAudio::State state);
     void flushPending();
     void trimPending();
     void refreshOutputDevices();
@@ -73,6 +76,7 @@ private:
     AudioResampler m_resampler;
     QTimer m_keepAliveTimer;
     QTimer m_devicePollTimer;
+    QTimer m_restartTimer;
     QElapsedTimer m_lastWrite;
     int m_keepAliveMs = 60;
     int m_keepAliveBytes = 0;
@@ -89,4 +93,6 @@ private:
     int m_trimStepBytes = 0;
     int m_lastFrameBytes = 0;
     int m_outputGainPercent = 100;
+    bool m_restartScheduled = false;
+    bool m_resettingSink = false;
 };
