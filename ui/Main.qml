@@ -646,6 +646,14 @@ Window {
             }
         }
 
+        Connections {
+            target: androidPttBridge
+            function onAudioRouteChanged() {
+                root.syncCueAudioDevice()
+                root.recoverCueEngine(true)
+            }
+        }
+
         SoundEffect {
             id: pttOnCueA
             property int playRequestId: 0

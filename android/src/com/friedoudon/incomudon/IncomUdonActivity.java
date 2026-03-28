@@ -30,6 +30,7 @@ public class IncomUdonActivity extends QtActivity {
 
     public static native void onHeadsetPttChanged(boolean pressed);
     public static native void onNetworkAvailabilityChanged(boolean available);
+    public static native void onAudioRouteChanged();
     private static IncomUdonActivity sInstance;
     private AudioManager mAudioManager;
     private ConnectivityManager mConnectivityManager;
@@ -38,6 +39,7 @@ public class IncomUdonActivity extends QtActivity {
     private boolean mLastNetworkAvailable = true;
     private boolean mPttRouteEnabled = false;
     private boolean mPreferCommunicationMode = false;
+    private boolean mCommunicationRouteActive = false;
     private int mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
     private ToneGenerator mToneVoiceCall;
     private ToneGenerator mToneMedia;
@@ -47,6 +49,7 @@ public class IncomUdonActivity extends QtActivity {
         public void run() {
             applyPttAudioRoute(mPttRouteEnabled, true);
             forceMediaVolumeStream();
+            notifyAudioRouteChanged();
         }
     };
 
@@ -345,6 +348,13 @@ public class IncomUdonActivity extends QtActivity {
         }
     }
 
+    private void notifyAudioRouteChanged() {
+        try {
+            onAudioRouteChanged();
+        } catch (UnsatisfiedLinkError ignored) {
+        }
+    }
+
     private void applyPreferCommunicationMode(boolean enabled) {
         if (mPreferCommunicationMode == enabled) {
             return;
@@ -424,42 +434,48 @@ public class IncomUdonActivity extends QtActivity {
             final boolean useBluetoothSco = useCommunicationMode && shouldUseBluetoothSco();
 
             if (useCommunicationMode) {
-                mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-                try {
-                    if (useBluetoothSco) {
-                        mAudioManager.startBluetoothSco();
-                        mAudioManager.setBluetoothScoOn(true);
-                    } else {
-                        mAudioManager.setBluetoothScoOn(false);
-                    }
-                } catch (Exception ignored) {
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (!mCommunicationRouteActive || forceApply) {
+                    mAudioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
                     try {
-                        final AudioDeviceInfo comm = findPreferredCommunicationDevice();
-                        if (comm != null) {
-                            mAudioManager.setCommunicationDevice(comm);
+                        if (useBluetoothSco) {
+                            mAudioManager.startBluetoothSco();
+                            mAudioManager.setBluetoothScoOn(true);
+                        } else {
+                            mAudioManager.setBluetoothScoOn(false);
                         }
                     } catch (Exception ignored) {
                     }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            final AudioDeviceInfo comm = findPreferredCommunicationDevice();
+                            if (comm != null) {
+                                mAudioManager.setCommunicationDevice(comm);
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    mCommunicationRouteActive = true;
                 }
                 applySpeakerphonePreference();
             } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (mCommunicationRouteActive) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            mAudioManager.clearCommunicationDevice();
+                        } catch (Exception ignored) {
+                        }
+                    }
                     try {
-                        mAudioManager.clearCommunicationDevice();
+                        mAudioManager.stopBluetoothSco();
                     } catch (Exception ignored) {
                     }
+                    try {
+                        mAudioManager.setBluetoothScoOn(false);
+                    } catch (Exception ignored) {
+                    }
+                    mAudioManager.setMode(AudioManager.MODE_NORMAL);
+                    mCommunicationRouteActive = false;
                 }
-                try {
-                    mAudioManager.stopBluetoothSco();
-                } catch (Exception ignored) {
-                }
-                try {
-                    mAudioManager.setBluetoothScoOn(false);
-                } catch (Exception ignored) {
-                }
-                mAudioManager.setMode(AudioManager.MODE_NORMAL);
                 applySpeakerphonePreference();
             }
             if (enabled) {

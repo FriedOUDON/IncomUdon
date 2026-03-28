@@ -30,7 +30,9 @@ bool AndroidPttBridge::initialize()
         {"onHeadsetPttChanged", "(Z)V",
          reinterpret_cast<void*>(&AndroidPttBridge::nativeOnHeadsetPttChanged)},
         {"onNetworkAvailabilityChanged", "(Z)V",
-         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnNetworkAvailabilityChanged)}
+         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnNetworkAvailabilityChanged)},
+        {"onAudioRouteChanged", "()V",
+         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnAudioRouteChanged)}
     };
 
     const bool ok = env.registerNativeMethods("com/friedoudon/incomudon/IncomUdonActivity",
@@ -141,6 +143,18 @@ void AndroidPttBridge::nativeOnNetworkAvailabilityChanged(JNIEnv* env, jclass cl
     QMetaObject::invokeMethod(&AndroidPttBridge::instance(),
                               [isAvailable]() {
         emit AndroidPttBridge::instance().networkAvailabilityChanged(isAvailable);
+    },
+                              Qt::QueuedConnection);
+}
+
+void AndroidPttBridge::nativeOnAudioRouteChanged(JNIEnv* env, jclass clazz)
+{
+    Q_UNUSED(env)
+    Q_UNUSED(clazz)
+
+    QMetaObject::invokeMethod(&AndroidPttBridge::instance(),
+                              []() {
+        emit AndroidPttBridge::instance().audioRouteChanged();
     },
                               Qt::QueuedConnection);
 }
