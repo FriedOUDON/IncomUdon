@@ -141,6 +141,25 @@ void AndroidPttBridge::playCueSound(const QString& uri, int cueId, int volumePer
 #endif
 }
 
+void AndroidPttBridge::prepareCueSound(const QString& uri, int cueId)
+{
+#ifdef Q_OS_ANDROID
+    if (!m_initialized)
+        initialize();
+
+    const QJniObject jUri = QJniObject::fromString(uri);
+    QJniObject::callStaticMethod<void>(
+        "com/friedoudon/incomudon/IncomUdonActivity",
+        "prepareCueSound",
+        "(Ljava/lang/String;I)V",
+        jUri.object<jstring>(),
+        static_cast<jint>(cueId));
+#else
+    Q_UNUSED(uri)
+    Q_UNUSED(cueId)
+#endif
+}
+
 #ifdef Q_OS_ANDROID
 void AndroidPttBridge::nativeOnHeadsetPttChanged(JNIEnv* env, jclass clazz, jboolean pressed)
 {

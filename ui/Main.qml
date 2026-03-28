@@ -451,6 +451,21 @@ Window {
             return true
         }
 
+        function prepareAndroidCueSound(cueId) {
+            if (!root.useAndroidNativeCuePlayback())
+                return
+
+            var sourceUrl = ""
+            if (cueId === 1)
+                sourceUrl = root.pttOnSoundUrl
+            else if (cueId === 2)
+                sourceUrl = root.pttOffSoundUrl
+            else if (cueId === 3)
+                sourceUrl = root.carrierSenseSoundUrl
+
+            androidPttBridge.prepareCueSound(sourceUrl.toString(), cueId)
+        }
+
         function syncCodec2Availability() {
             if (appState.codecSelection === 1 && !root.codec2Selectable) {
                 root.suppressForcePcmPersistence = true
@@ -586,6 +601,7 @@ Window {
             tabs.currentIndex = Math.max(0, Math.min(1, persisted.pageIndex))
             root.refreshLicensesText()
             Qt.callLater(root.tryAutoConnectOnStartup)
+            root.recoverCueEngine(true)
             cueWarmupTimer.start()
         }
 
@@ -597,9 +613,18 @@ Window {
         onPttOffSoundEnabledChanged: persisted.pttOffSoundEnabled = pttOffSoundEnabled
         onCarrierSenseSoundEnabledChanged: persisted.carrierSenseSoundEnabled = carrierSenseSoundEnabled
         onCueVolumePercentChanged: persisted.cueVolumePercent = cueVolumePercent
-        onPttOnSoundUrlChanged: persisted.pttOnSoundUrl = pttOnSoundUrl.toString()
-        onPttOffSoundUrlChanged: persisted.pttOffSoundUrl = pttOffSoundUrl.toString()
-        onCarrierSenseSoundUrlChanged: persisted.carrierSenseSoundUrl = carrierSenseSoundUrl.toString()
+        onPttOnSoundUrlChanged: {
+            persisted.pttOnSoundUrl = pttOnSoundUrl.toString()
+            root.recoverCueEngine(true)
+        }
+        onPttOffSoundUrlChanged: {
+            persisted.pttOffSoundUrl = pttOffSoundUrl.toString()
+            root.recoverCueEngine(true)
+        }
+        onCarrierSenseSoundUrlChanged: {
+            persisted.carrierSenseSoundUrl = carrierSenseSoundUrl.toString()
+            root.recoverCueEngine(true)
+        }
 
         Connections {
             target: appState
@@ -765,6 +790,13 @@ Window {
             if (!force && (nowMs - root.lastCueRecoveryMs) < 250)
                 return
             root.lastCueRecoveryMs = nowMs
+
+            if (root.useAndroidNativeCuePlayback()) {
+                root.prepareAndroidCueSound(1)
+                root.prepareAndroidCueSound(2)
+                root.prepareAndroidCueSound(3)
+                return
+            }
 
             root.pttOnCuePendingA = false
             root.pttOnCuePendingB = false

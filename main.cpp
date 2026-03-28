@@ -421,6 +421,8 @@ int main(int argc, char *argv[])
         }
         androidNetworkReconnectTimer.start();
     });
+    QObject::connect(&androidPttBridge, &AndroidPttBridge::audioRouteChanged,
+                     &audioInput, &AudioInput::restartForRouteChange);
     QObject::connect(&androidNetworkReconnectTimer, &QTimer::timeout,
                      &appState,
                      [&appState, &channelManager,

@@ -19,6 +19,7 @@ public:
     void setPreferredOutputRoute(int route);
     Q_INVOKABLE void playCueTone(int cueId);
     Q_INVOKABLE void playCueSound(const QString& uri, int cueId, int volumePercent);
+    Q_INVOKABLE void prepareCueSound(const QString& uri, int cueId);
 
 signals:
     void headsetButtonChanged(bool pressed);

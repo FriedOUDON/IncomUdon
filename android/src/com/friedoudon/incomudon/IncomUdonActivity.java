@@ -7,6 +7,7 @@ import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
+import android.media.SoundPool;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -16,11 +17,16 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
+import android.util.SparseArray;
+import android.util.SparseBooleanArray;
+import android.util.SparseIntArray;
 import android.view.KeyEvent;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import org.qtproject.qt.android.bindings.QtActivity;
 
 public class IncomUdonActivity extends QtActivity {
@@ -44,6 +50,13 @@ public class IncomUdonActivity extends QtActivity {
     private boolean mCommunicationRouteActive = false;
     private int mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
     private MediaPlayer mCuePlayer;
+    private SoundPool mCueSoundPool;
+    private final SparseIntArray mCueSoundIds = new SparseIntArray();
+    private final SparseBooleanArray mCueSoundReady = new SparseBooleanArray();
+    private final SparseArray<String> mCueSourceKeys = new SparseArray<>();
+    private final SparseIntArray mCuePendingPlayVolume = new SparseIntArray();
+    private final SparseIntArray mSoundIdToCueId = new SparseIntArray();
+    private final Map<Integer, AssetFileDescriptor> mPendingCueDescriptors = new HashMap<>();
     private int mCueVolumePercent = 90;
     private AudioDeviceCallback mAudioDeviceCallback;
     private final Runnable mRouteRefreshRunnable = new Runnable() {
@@ -65,6 +78,9 @@ public class IncomUdonActivity extends QtActivity {
         registerAudioDeviceCallback();
         applyPttAudioRoute(false, true);
         forceMediaVolumeStream();
+        prepareCueSoundInternal("", 1);
+        prepareCueSoundInternal("", 2);
+        prepareCueSoundInternal("", 3);
         scheduleRouteRefresh(250);
         registerNetworkCallback();
         notifyNetworkAvailabilityChanged(isNetworkAvailable());
@@ -136,6 +152,14 @@ public class IncomUdonActivity extends QtActivity {
             return;
         }
         activity.runOnUiThread(() -> activity.playCueSoundInternal(uriText, cueId, volumePercent));
+    }
+
+    public static void prepareCueSound(final String uriText, final int cueId) {
+        final IncomUdonActivity activity = sInstance;
+        if (activity == null) {
+            return;
+        }
+        activity.runOnUiThread(() -> activity.prepareCueSoundInternal(uriText, cueId));
     }
 
     public static void setKeepAliveServiceEnabled(final boolean enabled) {
@@ -672,9 +696,165 @@ public class IncomUdonActivity extends QtActivity {
         }
     }
 
-    private void playCueSoundInternal(String uriText, int cueId, int volumePercent) {
+    private String cueSourceKey(String uriText, int cueId) {
         final String normalized = uriText == null ? "" : uriText.trim();
-        mCueVolumePercent = Math.max(0, Math.min(100, volumePercent));
+        if (normalized.isEmpty() ||
+            normalized.startsWith("qrc:/") ||
+            normalized.startsWith("qrc://")) {
+            return "raw:" + cueId;
+        }
+        return normalized;
+    }
+
+    private void ensureCueSoundPool() {
+        if (mCueSoundPool != null) {
+            return;
+        }
+
+        final SoundPool.Builder builder = new SoundPool.Builder()
+            .setMaxStreams(3);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            builder.setAudioAttributes(new AudioAttributes.Builder()
+                .setLegacyStreamType(AudioManager.STREAM_MUSIC)
+                .build());
+        }
+        mCueSoundPool = builder.build();
+        mCueSoundPool.setOnLoadCompleteListener((soundPool, sampleId, status) -> {
+            closePendingCueDescriptor(sampleId);
+            final int cueId = mSoundIdToCueId.get(sampleId, 0);
+            if (cueId == 0) {
+                return;
+            }
+            if (status != 0) {
+                unloadCueSound(cueId);
+                return;
+            }
+            mCueSoundReady.put(cueId, true);
+            final int pendingVolume = mCuePendingPlayVolume.get(cueId, -1);
+            if (pendingVolume >= 0) {
+                mCuePendingPlayVolume.delete(cueId);
+                playLoadedCueSound(cueId, pendingVolume);
+            }
+        });
+    }
+
+    private void closePendingCueDescriptor(int sampleId) {
+        final AssetFileDescriptor afd = mPendingCueDescriptors.remove(sampleId);
+        if (afd == null) {
+            return;
+        }
+        try {
+            afd.close();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void unloadCueSound(int cueId) {
+        final int soundId = mCueSoundIds.get(cueId, 0);
+        if (soundId != 0) {
+            closePendingCueDescriptor(soundId);
+            if (mCueSoundPool != null) {
+                try {
+                    mCueSoundPool.unload(soundId);
+                } catch (Exception ignored) {
+                }
+            }
+            mSoundIdToCueId.delete(soundId);
+        }
+        mCueSoundIds.delete(cueId);
+        mCueSoundReady.delete(cueId);
+        mCuePendingPlayVolume.delete(cueId);
+        mCueSourceKeys.remove(cueId);
+    }
+
+    private boolean prepareCueSoundInternal(String uriText, int cueId) {
+        if (cueId < 1 || cueId > 3) {
+            return false;
+        }
+
+        ensureCueSoundPool();
+        if (mCueSoundPool == null) {
+            return false;
+        }
+
+        final String sourceKey = cueSourceKey(uriText, cueId);
+        if (sourceKey.equals(mCueSourceKeys.get(cueId)) &&
+            mCueSoundIds.get(cueId, 0) != 0) {
+            return true;
+        }
+
+        unloadCueSound(cueId);
+
+        int soundId = 0;
+        try {
+            if (sourceKey.startsWith("raw:")) {
+                final int rawResId = cueResourceIdForCueId(cueId);
+                if (rawResId == 0) {
+                    return false;
+                }
+                soundId = mCueSoundPool.load(this, rawResId, 1);
+            } else if (sourceKey.startsWith("content://")) {
+                final AssetFileDescriptor afd =
+                    getContentResolver().openAssetFileDescriptor(Uri.parse(sourceKey), "r");
+                if (afd == null) {
+                    return false;
+                }
+                soundId = mCueSoundPool.load(afd, 1);
+                if (soundId == 0) {
+                    afd.close();
+                    return false;
+                }
+                mPendingCueDescriptors.put(soundId, afd);
+            } else {
+                String path = sourceKey;
+                if (sourceKey.startsWith("file://")) {
+                    final Uri uri = Uri.parse(sourceKey);
+                    path = uri.getPath();
+                }
+                if (path == null || path.isEmpty()) {
+                    return false;
+                }
+                soundId = mCueSoundPool.load(path, 1);
+            }
+        } catch (Exception ignored) {
+            if (soundId != 0) {
+                closePendingCueDescriptor(soundId);
+            }
+            return false;
+        }
+
+        if (soundId == 0) {
+            return false;
+        }
+
+        mCueSourceKeys.put(cueId, sourceKey);
+        mCueSoundIds.put(cueId, soundId);
+        mCueSoundReady.put(cueId, false);
+        mSoundIdToCueId.put(soundId, cueId);
+        return true;
+    }
+
+    private void playLoadedCueSound(int cueId, int volumePercent) {
+        if (mCueSoundPool == null) {
+            return;
+        }
+        final int soundId = mCueSoundIds.get(cueId, 0);
+        if (soundId == 0 || !mCueSoundReady.get(cueId, false)) {
+            return;
+        }
+
+        final float gain = Math.max(0.0f, Math.min(1.0f, volumePercent / 100.0f));
+        try {
+            mCueSoundPool.play(soundId, gain, gain, 1, 0, 1.0f);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void playCueSoundWithMediaPlayerFallback(String uriText, int volumePercent) {
+        final String normalized = uriText == null ? "" : uriText.trim();
+        if (normalized.isEmpty()) {
+            return;
+        }
 
         releaseCuePlayer();
 
@@ -688,35 +868,16 @@ public class IncomUdonActivity extends QtActivity {
                 player.setAudioStreamType(AudioManager.STREAM_MUSIC);
             }
 
-            if (normalized.isEmpty() ||
-                normalized.startsWith("qrc:/") ||
-                normalized.startsWith("qrc://")) {
-                final int rawResId = cueResourceIdForCueId(cueId);
-                if (rawResId == 0) {
-                    player.release();
-                    return;
-                }
-                try (AssetFileDescriptor afd = getResources().openRawResourceFd(rawResId)) {
-                    if (afd == null) {
-                        player.release();
-                        return;
-                    }
-                    player.setDataSource(afd.getFileDescriptor(),
-                                         afd.getStartOffset(),
-                                         afd.getLength());
-                }
+            final Uri uri;
+            if (normalized.startsWith("content://") ||
+                normalized.startsWith("file://") ||
+                normalized.startsWith("http://") ||
+                normalized.startsWith("https://")) {
+                uri = Uri.parse(normalized);
+                player.setDataSource(this, uri);
             } else {
-                final Uri uri;
-                if (normalized.startsWith("content://") ||
-                    normalized.startsWith("file://") ||
-                    normalized.startsWith("http://") ||
-                    normalized.startsWith("https://")) {
-                    uri = Uri.parse(normalized);
-                    player.setDataSource(this, uri);
-                } else {
-                    uri = Uri.fromFile(new File(normalized));
-                    player.setDataSource(this, uri);
-                }
+                uri = Uri.fromFile(new File(normalized));
+                player.setDataSource(this, uri);
             }
 
             final float gain = Math.max(0.0f, Math.min(1.0f, volumePercent / 100.0f));
@@ -755,6 +916,23 @@ public class IncomUdonActivity extends QtActivity {
         }
     }
 
+    private void playCueSoundInternal(String uriText, int cueId, int volumePercent) {
+        mCueVolumePercent = Math.max(0, Math.min(100, volumePercent));
+        releaseCuePlayer();
+
+        final boolean prepared = prepareCueSoundInternal(uriText, cueId);
+        if (!prepared) {
+            playCueSoundWithMediaPlayerFallback(uriText, mCueVolumePercent);
+            return;
+        }
+
+        if (mCueSoundReady.get(cueId, false)) {
+            playLoadedCueSound(cueId, mCueVolumePercent);
+        } else {
+            mCuePendingPlayVolume.put(cueId, mCueVolumePercent);
+        }
+    }
+
     private void releaseCuePlayer() {
         if (mCuePlayer == null) {
             return;
@@ -775,6 +953,21 @@ public class IncomUdonActivity extends QtActivity {
     }
 
     private void releaseToneGenerators() {
+        if (mCueSoundPool != null) {
+            for (int i = 0; i < mCueSoundIds.size(); ++i) {
+                closePendingCueDescriptor(mCueSoundIds.valueAt(i));
+            }
+            try {
+                mCueSoundPool.release();
+            } catch (Exception ignored) {
+            }
+            mCueSoundPool = null;
+        }
+        mCueSoundIds.clear();
+        mCueSoundReady.clear();
+        mCueSourceKeys.clear();
+        mCuePendingPlayVolume.clear();
+        mSoundIdToCueId.clear();
         releaseCuePlayer();
     }
 

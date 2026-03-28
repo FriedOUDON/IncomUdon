@@ -319,6 +319,7 @@ void AudioInput::start()
     m_noiseGateGain = 1.0f;
 
     m_source = new QAudioSource(device, m_deviceFormat, this);
+    m_activeInputDeviceId = encodeDeviceId(device.id());
     const int deviceBytesPerSample = m_deviceFormat.bytesPerSample();
     const int deviceChannels = qMax(1, m_deviceFormat.channelCount());
     const int deviceFrameBytes = (deviceBytesPerSample > 0)
@@ -362,6 +363,20 @@ void AudioInput::stop()
         m_running = false;
         emit runningChanged();
     }
+}
+
+void AudioInput::restartForRouteChange()
+{
+    if (!m_wantRunning)
+        return;
+
+    clearSource();
+    if (m_running)
+    {
+        m_running = false;
+        emit runningChanged();
+    }
+    scheduleRestart(50);
 }
 
 void AudioInput::onReadyRead()
@@ -441,6 +456,7 @@ void AudioInput::clearSource()
     }
     m_deviceBuffer.clear();
     m_buffer.clear();
+    m_activeInputDeviceId.clear();
     m_resampler.reset();
     m_noiseFloor = 0.0f;
     m_noiseGateGain = 1.0f;
@@ -496,6 +512,7 @@ void AudioInput::refreshInputDevices()
 {
     const QList<QAudioDevice> devices = QMediaDevices::audioInputs();
     const QAudioDevice defaultDevice = QMediaDevices::defaultAudioInput();
+    const QString resolvedBefore = m_activeInputDeviceId;
 
     QStringList names;
     QStringList ids;
@@ -523,6 +540,13 @@ void AudioInput::refreshInputDevices()
         m_selectedInputDeviceId.clear();
         emit selectedInputDeviceIdChanged();
     }
+
+    if (!m_wantRunning || resolvedBefore.isEmpty())
+        return;
+
+    const QString resolvedNow = encodeDeviceId(resolveInputDevice().id());
+    if (!resolvedNow.isEmpty() && resolvedNow != resolvedBefore)
+        restartForRouteChange();
 }
 
 QAudioDevice AudioInput::resolveInputDevice() const

@@ -77,6 +77,7 @@ public:
 public slots:
     void start();
     void stop();
+    void restartForRouteChange();
 
 signals:
     void frameReady(const QByteArray& pcmFrame);
@@ -114,6 +115,7 @@ private:
     QStringList m_inputDeviceNames;
     QStringList m_inputDeviceIds;
     QString m_selectedInputDeviceId;
+    QString m_activeInputDeviceId;
     AudioResampler m_resampler;
     QMediaDevices* m_mediaDevices = nullptr;
     int m_frameBytes = 320;
