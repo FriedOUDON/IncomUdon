@@ -1,12 +1,12 @@
 package com.friedoudon.incomudon;
 
 import android.content.ContentResolver;
+import android.content.res.AssetFileDescriptor;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.MediaPlayer;
-import android.media.ToneGenerator;
 import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -43,16 +43,15 @@ public class IncomUdonActivity extends QtActivity {
     private boolean mPreferCommunicationMode = false;
     private boolean mCommunicationRouteActive = false;
     private int mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
-    private ToneGenerator mToneVoiceCall;
-    private ToneGenerator mToneMedia;
     private MediaPlayer mCuePlayer;
-    private int mCueToneVolume = 90;
+    private int mCueVolumePercent = 90;
     private AudioDeviceCallback mAudioDeviceCallback;
     private final Runnable mRouteRefreshRunnable = new Runnable() {
         @Override
         public void run() {
             applyPttAudioRoute(mPttRouteEnabled, true);
             forceMediaVolumeStream();
+            releaseCuePlayer();
             notifyAudioRouteChanged();
         }
     };
@@ -126,7 +125,9 @@ public class IncomUdonActivity extends QtActivity {
         if (activity == null) {
             return;
         }
-        activity.runOnUiThread(() -> activity.playCueToneInternal(cueId));
+        activity.runOnUiThread(() -> activity.playCueSoundInternal("",
+                                                                   cueId,
+                                                                   activity.mCueVolumePercent));
     }
 
     public static void playCueSound(final String uriText, final int cueId, final int volumePercent) {
@@ -658,63 +659,22 @@ public class IncomUdonActivity extends QtActivity {
                type == AudioDeviceInfo.TYPE_LINE_DIGITAL;
     }
 
-    private void playCueToneInternal(int cueId) {
-        final ToneGenerator tg = obtainCueToneGenerator(mCueToneVolume);
-        if (tg == null) {
-            return;
-        }
-
-        int toneType = ToneGenerator.TONE_PROP_ACK;
-        int durationMs = 90;
+    private int cueResourceIdForCueId(int cueId) {
         switch (cueId) {
-            case 1: // PTT ON
-                toneType = ToneGenerator.TONE_PROP_BEEP2;
-                durationMs = 85;
-                break;
-            case 2: // PTT OFF
-                toneType = ToneGenerator.TONE_PROP_BEEP;
-                durationMs = 70;
-                break;
-            case 3: // Carrier/BUSY
-                toneType = ToneGenerator.TONE_PROP_NACK;
-                durationMs = 110;
-                break;
+            case 1:
+                return R.raw.ptt_on;
+            case 2:
+                return R.raw.ptt_off;
+            case 3:
+                return R.raw.carrier_sense;
             default:
-                break;
+                return 0;
         }
-
-        try {
-            tg.startTone(toneType, durationMs);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private ToneGenerator obtainCueToneGenerator(int volumePercent) {
-        final int normalizedVolume = Math.max(0, Math.min(100, volumePercent));
-        if (mCueToneVolume != normalizedVolume) {
-            mCueToneVolume = normalizedVolume;
-            releaseToneGenerators();
-        }
-
-        if (mToneMedia == null) {
-            try {
-                mToneMedia = new ToneGenerator(AudioManager.STREAM_MUSIC, mCueToneVolume);
-            } catch (Exception ignored) {
-                mToneMedia = null;
-            }
-        }
-        return mToneMedia;
     }
 
     private void playCueSoundInternal(String uriText, int cueId, int volumePercent) {
         final String normalized = uriText == null ? "" : uriText.trim();
-        if (normalized.isEmpty() ||
-            normalized.startsWith("qrc:/") ||
-            normalized.startsWith("qrc://")) {
-            mCueToneVolume = Math.max(0, Math.min(100, volumePercent));
-            playCueToneInternal(cueId);
-            return;
-        }
+        mCueVolumePercent = Math.max(0, Math.min(100, volumePercent));
 
         releaseCuePlayer();
 
@@ -722,21 +682,41 @@ public class IncomUdonActivity extends QtActivity {
             final MediaPlayer player = new MediaPlayer();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 player.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setLegacyStreamType(AudioManager.STREAM_MUSIC)
                     .build());
+            } else {
+                player.setAudioStreamType(AudioManager.STREAM_MUSIC);
             }
 
-            final Uri uri;
-            if (normalized.startsWith("content://") ||
-                normalized.startsWith("file://") ||
-                normalized.startsWith("http://") ||
-                normalized.startsWith("https://")) {
-                uri = Uri.parse(normalized);
-                player.setDataSource(this, uri);
+            if (normalized.isEmpty() ||
+                normalized.startsWith("qrc:/") ||
+                normalized.startsWith("qrc://")) {
+                final int rawResId = cueResourceIdForCueId(cueId);
+                if (rawResId == 0) {
+                    player.release();
+                    return;
+                }
+                try (AssetFileDescriptor afd = getResources().openRawResourceFd(rawResId)) {
+                    if (afd == null) {
+                        player.release();
+                        return;
+                    }
+                    player.setDataSource(afd.getFileDescriptor(),
+                                         afd.getStartOffset(),
+                                         afd.getLength());
+                }
             } else {
-                uri = Uri.fromFile(new File(normalized));
-                player.setDataSource(this, uri);
+                final Uri uri;
+                if (normalized.startsWith("content://") ||
+                    normalized.startsWith("file://") ||
+                    normalized.startsWith("http://") ||
+                    normalized.startsWith("https://")) {
+                    uri = Uri.parse(normalized);
+                    player.setDataSource(this, uri);
+                } else {
+                    uri = Uri.fromFile(new File(normalized));
+                    player.setDataSource(this, uri);
+                }
             }
 
             final float gain = Math.max(0.0f, Math.min(1.0f, volumePercent / 100.0f));
@@ -772,8 +752,6 @@ public class IncomUdonActivity extends QtActivity {
             mCuePlayer = player;
         } catch (Exception ignored) {
             releaseCuePlayer();
-            mCueToneVolume = Math.max(0, Math.min(100, volumePercent));
-            playCueToneInternal(cueId);
         }
     }
 
@@ -797,29 +775,12 @@ public class IncomUdonActivity extends QtActivity {
     }
 
     private void releaseToneGenerators() {
-        if (mToneVoiceCall != null) {
-            try {
-                mToneVoiceCall.release();
-            } catch (Exception ignored) {
-            }
-            mToneVoiceCall = null;
-        }
-        if (mToneMedia != null) {
-            try {
-                mToneMedia.release();
-            } catch (Exception ignored) {
-            }
-            mToneMedia = null;
-        }
         releaseCuePlayer();
     }
 
     private void forceMediaVolumeStream() {
         try {
-            final boolean useVoiceStream = shouldUseCommunicationMode();
-            setVolumeControlStream(useVoiceStream
-                ? AudioManager.STREAM_VOICE_CALL
-                : AudioManager.STREAM_MUSIC);
+            setVolumeControlStream(AudioManager.STREAM_MUSIC);
         } catch (Exception ignored) {
         }
     }

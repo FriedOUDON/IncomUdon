@@ -431,12 +431,12 @@ Window {
             root.cueAudioDevice = target
         }
 
-        function useAndroidCueToneFallback() {
+        function useAndroidNativeCuePlayback() {
             return Qt.platform.os === "android"
         }
 
-        function playAndroidCueTone(cueId, enabled) {
-            if (!enabled || !root.useAndroidCueToneFallback())
+        function playAndroidCueSound(cueId, enabled) {
+            if (!enabled || !root.useAndroidNativeCuePlayback())
                 return false
 
             var sourceUrl = ""
@@ -780,7 +780,7 @@ Window {
         }
 
         function requestPttOnCue(enabled, requestId) {
-            if (root.playAndroidCueTone(1, enabled))
+            if (root.playAndroidCueSound(1, enabled))
                 return
             if (root.pttOnVoiceFlip) {
                 root.requestCue(pttOnCueA,
@@ -799,7 +799,7 @@ Window {
         }
 
         function requestPttOffCue(enabled) {
-            if (root.playAndroidCueTone(2, enabled))
+            if (root.playAndroidCueSound(2, enabled))
                 return
             if (root.pttOffVoiceFlip) {
                 root.requestCue(pttOffCueA,
@@ -822,7 +822,7 @@ Window {
             if (nowMs - root.lastCarrierCueMs < 150)
                 return
             root.lastCarrierCueMs = nowMs
-            if (root.playAndroidCueTone(3, root.carrierSenseSoundEnabled))
+            if (root.playAndroidCueSound(3, root.carrierSenseSoundEnabled))
                 return
             root.requestCue(carrierSenseCue,
                             root.carrierSenseSoundEnabled,
@@ -841,7 +841,7 @@ Window {
             const requestId = root.pttOnPlayRequestId
             root.pttOnCueRecoveryRequestId = 0
             root.requestPttOnCue(root.pttOnSoundEnabled, requestId)
-            if (root.pttOnSoundEnabled && !root.useAndroidCueToneFallback()) {
+            if (root.pttOnSoundEnabled && !root.useAndroidNativeCuePlayback()) {
                 root.pttOnRetryAttempts = 8
                 pttOnRetryTimer.requestId = requestId
                 pttOnRetryTimer.restart()
@@ -954,7 +954,7 @@ Window {
             interval: 140
             repeat: true
             onTriggered: {
-                if (root.useAndroidCueToneFallback())
+                if (root.useAndroidNativeCuePlayback())
                 {
                     stop()
                     return
