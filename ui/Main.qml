@@ -1314,7 +1314,11 @@ Window {
                                          ((appState.codecSelection === 1 && root.codec2Selectable) ||
                                           (appState.codecSelection === 2 && root.opusSelectable))
                                 currentIndex: root.bitrateToIndex(appState.codecBitrate, appState.codecSelection)
-                                onActivated: appState.codecBitrate = root.indexToBitrate(currentIndex, appState.codecSelection)
+                                focusPolicy: Qt.NoFocus
+                                onActivated: {
+                                    appState.codecBitrate = root.indexToBitrate(currentIndex, appState.codecSelection)
+                                    root.forceActiveFocus(Qt.MouseFocusReason)
+                                }
 
                                 contentItem: Text {
                                     leftPadding: 10
@@ -1680,9 +1684,11 @@ Window {
                                 anchors.margins: 2
                                 model: audioOutput.outputDeviceNames
                                 currentIndex: root.outputDeviceIndexFromId(audioOutput.selectedOutputDeviceId)
+                                focusPolicy: Qt.NoFocus
                                 onActivated: function(index) {
                                     if (index >= 0 && index < audioOutput.outputDeviceIds.length)
                                         audioOutput.selectedOutputDeviceId = audioOutput.outputDeviceIds[index]
+                                    root.forceActiveFocus(Qt.MouseFocusReason)
                                 }
                             }
                         }
@@ -1707,9 +1713,11 @@ Window {
                                 anchors.margins: 2
                                 model: audioInput.inputDeviceNames
                                 currentIndex: root.micDeviceIndexFromId(audioInput.selectedInputDeviceId)
+                                focusPolicy: Qt.NoFocus
                                 onActivated: function(index) {
                                     if (index >= 0 && index < audioInput.inputDeviceIds.length)
                                         audioInput.selectedInputDeviceId = audioInput.inputDeviceIds[index]
+                                    root.forceActiveFocus(Qt.MouseFocusReason)
                                 }
                             }
                         }

@@ -1,6 +1,7 @@
 package com.friedoudon.incomudon;
 
 import android.content.ContentResolver;
+import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
@@ -40,6 +41,14 @@ public class IncomUdonActivity extends QtActivity {
     private int mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
     private ToneGenerator mToneVoiceCall;
     private ToneGenerator mToneMedia;
+    private AudioDeviceCallback mAudioDeviceCallback;
+    private final Runnable mRouteRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            applyPttAudioRoute(mPttRouteEnabled, true);
+            forceMediaVolumeStream();
+        }
+    };
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -47,8 +56,10 @@ public class IncomUdonActivity extends QtActivity {
         sInstance = this;
         mAudioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
         mConnectivityManager = (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+        registerAudioDeviceCallback();
         applyPttAudioRoute(false, true);
         forceMediaVolumeStream();
+        scheduleRouteRefresh(250);
         registerNetworkCallback();
         notifyNetworkAvailabilityChanged(isNetworkAvailable());
     }
@@ -56,6 +67,7 @@ public class IncomUdonActivity extends QtActivity {
     @Override
     public void onDestroy() {
         unregisterNetworkCallback();
+        unregisterAudioDeviceCallback();
         stopKeepAliveService();
         mPreferCommunicationMode = false;
         mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
@@ -72,6 +84,7 @@ public class IncomUdonActivity extends QtActivity {
         super.onResume();
         applyPttAudioRoute(mPttRouteEnabled, true);
         forceMediaVolumeStream();
+        scheduleRouteRefresh(150);
     }
 
     public static void setPttAudioRoute(final boolean enabled) {
@@ -229,6 +242,54 @@ public class IncomUdonActivity extends QtActivity {
             mNetworkCallback = null;
             mNetworkCallbackRegistered = false;
         }
+    }
+
+    private void registerAudioDeviceCallback() {
+        if (mAudioManager == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            mAudioDeviceCallback != null) {
+            return;
+        }
+
+        mAudioDeviceCallback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                scheduleRouteRefresh(80);
+            }
+
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                scheduleRouteRefresh(80);
+            }
+        };
+
+        try {
+            mAudioManager.registerAudioDeviceCallback(mAudioDeviceCallback, null);
+        } catch (Exception ignored) {
+            mAudioDeviceCallback = null;
+        }
+    }
+
+    private void unregisterAudioDeviceCallback() {
+        if (mAudioManager == null || mAudioDeviceCallback == null) {
+            return;
+        }
+        try {
+            mAudioManager.unregisterAudioDeviceCallback(mAudioDeviceCallback);
+        } catch (Exception ignored) {
+        }
+        mAudioDeviceCallback = null;
+    }
+
+    private void scheduleRouteRefresh(long delayMs) {
+        runOnUiThread(() -> {
+            if (getWindow() == null || getWindow().getDecorView() == null) {
+                applyPttAudioRoute(mPttRouteEnabled, true);
+                forceMediaVolumeStream();
+                return;
+            }
+            getWindow().getDecorView().removeCallbacks(mRouteRefreshRunnable);
+            getWindow().getDecorView().postDelayed(mRouteRefreshRunnable, Math.max(0L, delayMs));
+        });
     }
 
     private void unregisterNetworkCallback() {
