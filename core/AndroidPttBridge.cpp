@@ -29,6 +29,8 @@ bool AndroidPttBridge::initialize()
     const JNINativeMethod methods[] = {
         {"onHeadsetPttChanged", "(Z)V",
          reinterpret_cast<void*>(&AndroidPttBridge::nativeOnHeadsetPttChanged)},
+        {"onVolumePttChanged", "(Z)V",
+         reinterpret_cast<void*>(&AndroidPttBridge::nativeOnVolumePttChanged)},
         {"onNetworkAvailabilityChanged", "(Z)V",
          reinterpret_cast<void*>(&AndroidPttBridge::nativeOnNetworkAvailabilityChanged)},
         {"onAudioRouteChanged", "()V",
@@ -104,6 +106,22 @@ void AndroidPttBridge::setPreferredOutputRoute(int route)
 #endif
 }
 
+void AndroidPttBridge::setVolumePttEnabled(bool enabled)
+{
+#ifdef Q_OS_ANDROID
+    if (!m_initialized)
+        initialize();
+
+    QJniObject::callStaticMethod<void>(
+        "com/friedoudon/incomudon/IncomUdonActivity",
+        "setVolumePttEnabled",
+        "(Z)V",
+        static_cast<jboolean>(enabled ? JNI_TRUE : JNI_FALSE));
+#else
+    Q_UNUSED(enabled)
+#endif
+}
+
 void AndroidPttBridge::playCueTone(int cueId)
 {
 #ifdef Q_OS_ANDROID
@@ -170,6 +188,19 @@ void AndroidPttBridge::nativeOnHeadsetPttChanged(JNIEnv* env, jclass clazz, jboo
     QMetaObject::invokeMethod(&AndroidPttBridge::instance(),
                               [isPressed]() {
         emit AndroidPttBridge::instance().headsetButtonChanged(isPressed);
+    },
+                              Qt::QueuedConnection);
+}
+
+void AndroidPttBridge::nativeOnVolumePttChanged(JNIEnv* env, jclass clazz, jboolean pressed)
+{
+    Q_UNUSED(env)
+    Q_UNUSED(clazz)
+
+    const bool isPressed = (pressed == JNI_TRUE);
+    QMetaObject::invokeMethod(&AndroidPttBridge::instance(),
+                              [isPressed]() {
+        emit AndroidPttBridge::instance().volumeButtonPttChanged(isPressed);
     },
                               Qt::QueuedConnection);
 }

@@ -75,6 +75,7 @@ Window {
         property bool pttOnSoundEnabled: true
         property bool pttOffSoundEnabled: true
         property bool carrierSenseSoundEnabled: true
+        property bool volumeKeyPttEnabled: false
         property string cuePickerTarget: ""
         property bool pttOnCuePendingA: false
         property bool pttOnCuePendingB: false
@@ -528,6 +529,7 @@ Window {
             property bool pttOnSoundEnabled: true
             property bool pttOffSoundEnabled: true
             property bool carrierSenseSoundEnabled: true
+            property bool volumeKeyPttEnabled: false
             property string pttOnSoundUrl: ""
             property string pttOffSoundUrl: ""
             property string carrierSenseSoundUrl: ""
@@ -584,6 +586,7 @@ Window {
             root.pttOnSoundEnabled = persisted.pttOnSoundEnabled
             root.pttOffSoundEnabled = persisted.pttOffSoundEnabled
             root.carrierSenseSoundEnabled = persisted.carrierSenseSoundEnabled
+            root.volumeKeyPttEnabled = persisted.volumeKeyPttEnabled
             root.pttOnSoundUrl = persisted.pttOnSoundUrl.length > 0 ?
                                      persisted.pttOnSoundUrl : root.defaultPttOnSoundUrl
             root.pttOffSoundUrl = persisted.pttOffSoundUrl.length > 0 ?
@@ -612,6 +615,10 @@ Window {
         onPttOnSoundEnabledChanged: persisted.pttOnSoundEnabled = pttOnSoundEnabled
         onPttOffSoundEnabledChanged: persisted.pttOffSoundEnabled = pttOffSoundEnabled
         onCarrierSenseSoundEnabledChanged: persisted.carrierSenseSoundEnabled = carrierSenseSoundEnabled
+        onVolumeKeyPttEnabledChanged: {
+            persisted.volumeKeyPttEnabled = volumeKeyPttEnabled
+            androidPttBridge.setVolumePttEnabled(volumeKeyPttEnabled)
+        }
         onCueVolumePercentChanged: persisted.cueVolumePercent = cueVolumePercent
         onPttOnSoundUrlChanged: {
             persisted.pttOnSoundUrl = pttOnSoundUrl.toString()
@@ -1779,6 +1786,34 @@ Window {
                                         audioInput.selectedInputDeviceId = audioInput.inputDeviceIds[index]
                                     root.forceActiveFocus(Qt.MouseFocusReason)
                                 }
+                            }
+                        }
+
+                        Text {
+                            visible: Qt.platform.os === "android"
+                            text: qsTr("Volume Key PTT")
+                            color: "#90a4ae"
+                            font.pixelSize: 13
+                        }
+
+                        Row {
+                            visible: Qt.platform.os === "android"
+                            width: parent.width
+                            spacing: 10
+
+                            Switch {
+                                id: volumeKeyPttSwitch
+                                checked: root.volumeKeyPttEnabled
+                                onToggled: root.volumeKeyPttEnabled = checked
+                            }
+
+                            Text {
+                                anchors.verticalCenter: volumeKeyPttSwitch.verticalCenter
+                                width: parent.width - volumeKeyPttSwitch.width - parent.spacing
+                                wrapMode: Text.WordWrap
+                                text: qsTr("Use volume up/down buttons as push-to-talk.")
+                                color: "#cfd8dc"
+                                font.pixelSize: 13
                             }
                         }
 

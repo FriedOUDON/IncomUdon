@@ -37,6 +37,7 @@ public class IncomUdonActivity extends QtActivity {
     private static final int OUTPUT_ROUTE_WIRED = 4;
 
     public static native void onHeadsetPttChanged(boolean pressed);
+    public static native void onVolumePttChanged(boolean pressed);
     public static native void onNetworkAvailabilityChanged(boolean available);
     public static native void onAudioRouteChanged();
     private static IncomUdonActivity sInstance;
@@ -48,6 +49,9 @@ public class IncomUdonActivity extends QtActivity {
     private boolean mPttRouteEnabled = false;
     private boolean mPreferCommunicationMode = false;
     private boolean mCommunicationRouteActive = false;
+    private boolean mVolumePttEnabled = false;
+    private boolean mVolumeUpPressed = false;
+    private boolean mVolumeDownPressed = false;
     private int mPreferredOutputRoute = OUTPUT_ROUTE_AUTO;
     private MediaPlayer mCuePlayer;
     private SoundPool mCueSoundPool;
@@ -134,6 +138,15 @@ public class IncomUdonActivity extends QtActivity {
         }
 
         activity.runOnUiThread(() -> activity.applyPreferredOutputRoute(route));
+    }
+
+    public static void setVolumePttEnabled(final boolean enabled) {
+        final IncomUdonActivity activity = sInstance;
+        if (activity == null) {
+            return;
+        }
+
+        activity.runOnUiThread(() -> activity.applyVolumePttEnabled(enabled));
     }
 
     public static void playCueTone(final int cueId) {
@@ -410,6 +423,40 @@ public class IncomUdonActivity extends QtActivity {
         }
         mPreferredOutputRoute = normalized;
         applyPttAudioRoute(mPttRouteEnabled, true);
+    }
+
+    private void applyVolumePttEnabled(boolean enabled) {
+        if (mVolumePttEnabled == enabled) {
+            return;
+        }
+        mVolumePttEnabled = enabled;
+        if (!mVolumePttEnabled) {
+            mVolumeUpPressed = false;
+            mVolumeDownPressed = false;
+            notifyVolumePttChanged(false);
+        }
+    }
+
+    private void updateVolumePttState(int keyCode, boolean pressed) {
+        boolean changed = false;
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            changed = (mVolumeUpPressed != pressed);
+            mVolumeUpPressed = pressed;
+        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            changed = (mVolumeDownPressed != pressed);
+            mVolumeDownPressed = pressed;
+        }
+        if (!changed) {
+            return;
+        }
+        notifyVolumePttChanged(mVolumeUpPressed || mVolumeDownPressed);
+    }
+
+    private void notifyVolumePttChanged(boolean pressed) {
+        try {
+            onVolumePttChanged(pressed);
+        } catch (UnsatisfiedLinkError ignored) {
+        }
     }
 
     private boolean shouldUseCommunicationMode() {
@@ -1012,6 +1059,22 @@ public class IncomUdonActivity extends QtActivity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         final int keyCode = event.getKeyCode();
+        if (mVolumePttEnabled &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
+             keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            final int action = event.getAction();
+            if (action == KeyEvent.ACTION_DOWN) {
+                if (!event.isAutoRepeat()) {
+                    updateVolumePttState(keyCode, true);
+                }
+                return true;
+            }
+            if (action == KeyEvent.ACTION_UP) {
+                updateVolumePttState(keyCode, false);
+                return true;
+            }
+            return true;
+        }
         if (keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
             keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
             final int action = event.getAction();

@@ -368,6 +368,14 @@ int main(int argc, char *argv[])
             return;
         appState.setPttPressed(!appState.pttPressed());
     });
+    QObject::connect(&androidPttBridge, &AndroidPttBridge::volumeButtonPttChanged,
+                     &appState, [&appState](bool pressed) {
+        if (pressed && !appState.serverOnline())
+            return;
+        if (appState.pttPressed() == pressed)
+            return;
+        appState.setPttPressed(pressed);
+    });
     QObject::connect(&appState, &AppState::pttPressedChanged,
                      &appState, [&appState, &pttPressElapsed,
                                  &pttRouteEnableTimer, &pttRouteReleaseTimer]() {
