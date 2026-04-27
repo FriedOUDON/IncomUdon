@@ -10,6 +10,7 @@
 #include <QHostInfo>
 #include <QtEndian>
 #include <QtMath>
+#include <algorithm>
 #include <cstring>
 
 static quint32 readU32Payload(const QByteArray& payload, quint32 fallback)
@@ -53,40 +54,6 @@ static QByteArray crossfadePcm16(const QByteArray& fromPcm,
     return out;
 }
 
-static QByteArray blendBoundaryPcm16(const QByteArray& prevPcm,
-                                     const QByteArray& nextPcm,
-                                     int fadeSamples)
-{
-    if (prevPcm.size() != nextPcm.size())
-        return nextPcm;
-
-    const int totalSamples = nextPcm.size() / static_cast<int>(sizeof(qint16));
-    if (totalSamples <= 0 || fadeSamples <= 0)
-        return nextPcm;
-
-    const int count = qMin(fadeSamples, totalSamples);
-    QByteArray out = nextPcm;
-    const char* prevPtr = prevPcm.constData();
-    const char* nextPtr = nextPcm.constData();
-    char* outPtr = out.data();
-    const int prevStart = totalSamples - count;
-
-    for (int i = 0; i < count; ++i)
-    {
-        const qint16 a = qFromLittleEndian<qint16>(
-            reinterpret_cast<const uchar*>(prevPtr + (prevStart + i) * static_cast<int>(sizeof(qint16))));
-        const qint16 b = qFromLittleEndian<qint16>(
-            reinterpret_cast<const uchar*>(nextPtr + i * static_cast<int>(sizeof(qint16))));
-        const float t = static_cast<float>(i + 1) / static_cast<float>(count + 1);
-        const float v = (1.0f - t) * static_cast<float>(a) + t * static_cast<float>(b);
-        const qint16 mixed = static_cast<qint16>(qBound(-32768, static_cast<int>(qRound(v)), 32767));
-        const qint16 le = qToLittleEndian<qint16>(mixed);
-        std::memcpy(outPtr + i * static_cast<int>(sizeof(qint16)), &le, sizeof(le));
-    }
-
-    return out;
-}
-
 static QByteArray holdDecayFromTailPcm16(const QByteArray& pcm)
 {
     if (pcm.isEmpty())
@@ -114,6 +81,48 @@ static QByteArray holdDecayFromTailPcm16(const QByteArray& pcm)
     return out;
 }
 
+static QVector<qint16> pcmToSamples(const QByteArray& pcm)
+{
+    const int sampleCount = pcm.size() / static_cast<int>(sizeof(qint16));
+    QVector<qint16> out;
+    out.reserve(sampleCount);
+    const char* data = pcm.constData();
+    for (int i = 0; i < sampleCount; ++i)
+    {
+        const qint16 sample = qFromLittleEndian<qint16>(
+            reinterpret_cast<const uchar*>(data + i * static_cast<int>(sizeof(qint16))));
+        out.append(sample);
+    }
+    return out;
+}
+
+static QByteArray samplesToPcm(const QVector<qint16>& samples, int offset, int count)
+{
+    const int boundedOffset = qBound(0, offset, samples.size());
+    const int boundedCount = qMax(0, qMin(count, samples.size() - boundedOffset));
+    QByteArray out(boundedCount * static_cast<int>(sizeof(qint16)), 0);
+    char* ptr = out.data();
+    for (int i = 0; i < boundedCount; ++i)
+    {
+        const qint16 le = qToLittleEndian<qint16>(samples.at(boundedOffset + i));
+        std::memcpy(ptr + i * static_cast<int>(sizeof(qint16)), &le, sizeof(le));
+    }
+    return out;
+}
+
+static QByteArray padPcmToSize(const QByteArray& pcm, int targetBytes)
+{
+    if (targetBytes <= 0)
+        return QByteArray();
+    if (pcm.size() >= targetBytes)
+        return pcm.left(targetBytes);
+
+    QByteArray padded = pcm;
+    padded.resize(targetBytes);
+    std::memset(padded.data() + pcm.size(), 0, targetBytes - pcm.size());
+    return padded;
+}
+
 ChannelManager::ChannelManager(QObject* parent)
     : QObject(parent)
 {
@@ -126,6 +135,13 @@ ChannelManager::ChannelManager(QObject* parent)
     m_playoutTimer.setTimerType(Qt::PreciseTimer);
     connect(&m_playoutTimer, &QTimer::timeout,
             this, &ChannelManager::onPlayoutTick);
+
+    updatePlayoutParams();
+}
+
+ChannelManager::~ChannelManager()
+{
+    clearStreams();
 }
 
 void ChannelManager::setTransport(UdpTransport* transport)
@@ -156,27 +172,45 @@ void ChannelManager::setCipher(AeadCipher* cipher)
 
 void ChannelManager::setJitterBuffer(JitterBuffer* jitter)
 {
-    m_jitter = jitter;
+    m_jitterTemplate = jitter;
+    updateStreamJitterTargets();
 }
 
 void ChannelManager::setCodec(Codec2Wrapper* codec)
 {
-    m_codec = codec;
-    if (m_codec)
+    if (m_codecTemplate == codec)
+        return;
+
+    if (m_codecTemplate)
+        disconnect(m_codecTemplate, nullptr, this, nullptr);
+
+    m_codecTemplate = codec;
+    if (m_codecTemplate)
     {
-        connect(m_codec, &Codec2Wrapper::frameMsChanged,
+        connect(m_codecTemplate, &Codec2Wrapper::frameMsChanged,
                 this, &ChannelManager::updatePlayoutParams);
-        connect(m_codec, &Codec2Wrapper::pcmFrameBytesChanged,
-                this, &ChannelManager::updatePlayoutParams);
-        connect(m_codec, &Codec2Wrapper::forcePcmChanged,
-                this, &ChannelManager::updatePlayoutParams);
+        connect(m_codecTemplate, &Codec2Wrapper::codec2LibraryPathChanged,
+                this, [this]() {
+                    for (RxStreamState* stream : std::as_const(m_streams))
+                        applyTemplateLibraryPaths(stream);
+                });
+        connect(m_codecTemplate, &Codec2Wrapper::opusLibraryPathChanged,
+                this, [this]() {
+                    for (RxStreamState* stream : std::as_const(m_streams))
+                        applyTemplateLibraryPaths(stream);
+                });
     }
+
+    for (RxStreamState* stream : std::as_const(m_streams))
+        applyTemplateLibraryPaths(stream);
     updatePlayoutParams();
 }
 
 void ChannelManager::setAudioOutput(AudioOutput* output)
 {
     m_audioOutput = output;
+    if (m_audioOutput)
+        m_audioOutput->setSampleRate(m_mixSampleRate);
 }
 
 void ChannelManager::setFecEnabled(bool enabled)
@@ -185,22 +219,13 @@ void ChannelManager::setFecEnabled(bool enabled)
         return;
 
     m_fecEnabled = enabled;
-    m_fecDecoder.setEnabled(enabled);
-    m_fecDecoder.reset();
-    m_playoutPrimed = false;
-    m_plcRemaining = 0;
-    m_pcmMissCount = 0;
-    m_talkEnded = false;
-    m_releaseTalkerId = 0;
-    m_silenceMode = false;
-    m_lastPcmFrame.clear();
-    m_fadeFromPcm.clear();
-    m_fadeOutPending = false;
-    m_fadeOutFrame.clear();
-    m_fadeInOnNextFrame = true;
+    for (RxStreamState* stream : std::as_const(m_streams))
+    {
+        stream->fecDecoder.setEnabled(enabled);
+        stream->fecDecoder.reset();
+        resetStreamState(stream, true);
+    }
     updatePlayoutParams();
-    if (m_jitter)
-        m_jitter->clear();
 }
 
 bool ChannelManager::connectToServer(int channelId,
@@ -238,7 +263,6 @@ bool ChannelManager::connectToServer(int channelId,
                 return false;
             }
 
-            // Prefer IPv4 because current UDP bind mode is AnyIPv4.
             for (const QHostAddress& candidate : info.addresses())
             {
                 if (candidate.protocol() == QAbstractSocket::IPv4Protocol)
@@ -292,18 +316,12 @@ bool ChannelManager::joinChannel(const ChannelConfig& config)
     m_packetizer->setUseLegacy(false);
     m_serverLocked = false;
     m_joinRetriesLeft = 5;
-    m_playoutPrimed = false;
-    m_fadeFromPcm.clear();
-    m_fadeOutPending = false;
-    m_fadeOutFrame.clear();
-    m_silenceMode = false;
-    m_plcRemaining = 0;
-    m_pcmMissCount = 0;
-    m_talkEnded = false;
-    m_releaseTalkerId = 0;
-    m_fecDecoder.reset();
-    if (m_jitter)
-        m_jitter->clear();
+    m_serverMultiTalkEnabled = false;
+    m_serverMaxActiveTalkers = 1;
+    m_activeTalkers.clear();
+    m_codecConfigCache.clear();
+    emitActiveTalkersState();
+    clearStreams();
 
     emit channelIdChanged();
     emit targetChanged();
@@ -331,21 +349,14 @@ void ChannelManager::leaveChannel()
 
     m_config = {};
     m_serverLocked = false;
+    m_serverMultiTalkEnabled = false;
+    m_serverMaxActiveTalkers = 1;
     m_joinRetryTimer.stop();
     m_joinRetriesLeft = 0;
-    m_playoutPrimed = false;
-    m_fadeFromPcm.clear();
-    m_fadeOutPending = false;
-    m_fadeOutFrame.clear();
-    m_silenceMode = false;
-    m_plcRemaining = 0;
-    m_pcmMissCount = 0;
-    m_talkEnded = false;
-    m_releaseTalkerId = 0;
-    m_fecDecoder.reset();
-    if (m_jitter)
-        m_jitter->clear();
-    m_playoutTimer.stop();
+    m_activeTalkers.clear();
+    m_codecConfigCache.clear();
+    emitActiveTalkersState();
+    clearStreams();
     emit channelIdChanged();
     emit targetChanged();
 }
@@ -363,6 +374,201 @@ QString ChannelManager::targetAddress() const
 quint16 ChannelManager::targetPort() const
 {
     return m_config.port;
+}
+
+void ChannelManager::clearStreams()
+{
+    m_playoutTimer.stop();
+    for (auto it = m_streams.begin(); it != m_streams.end(); ++it)
+    {
+        RxStreamState* stream = it.value();
+        delete stream->codec;
+        delete stream->jitter;
+        delete stream;
+    }
+    m_streams.clear();
+    emitPlayoutTalkersState();
+}
+
+QList<quint32> ChannelManager::sortedActiveTalkers() const
+{
+    QList<quint32> talkers = m_activeTalkers.values();
+    std::sort(talkers.begin(), talkers.end());
+    return talkers;
+}
+
+QList<quint32> ChannelManager::sortedPlayoutTalkers() const
+{
+    QList<quint32> talkers = m_streams.keys();
+    std::sort(talkers.begin(), talkers.end());
+    return talkers;
+}
+
+void ChannelManager::emitActiveTalkersState()
+{
+    const QList<quint32> talkers = sortedActiveTalkers();
+    emit activeTalkersChanged(talkers);
+    emit talkerChanged(talkers.isEmpty() ? 0 : talkers.constFirst());
+}
+
+void ChannelManager::emitPlayoutTalkersState()
+{
+    emit playoutTalkersChanged(sortedPlayoutTalkers());
+}
+
+void ChannelManager::applyTemplateLibraryPaths(RxStreamState* stream)
+{
+    if (!stream || !stream->codec)
+        return;
+
+    if (m_codecTemplate)
+    {
+        stream->codec->setCodec2LibraryPath(m_codecTemplate->codec2LibraryPath());
+        stream->codec->setOpusLibraryPath(m_codecTemplate->opusLibraryPath());
+    }
+}
+
+void ChannelManager::resetStreamState(RxStreamState* stream, bool clearBuffers)
+{
+    if (!stream)
+        return;
+
+    stream->playoutPrimed = false;
+    stream->fadeInOnNextFrame = false;
+    stream->silenceMode = true;
+    stream->talkEnded = false;
+    stream->releaseCompletionPending = false;
+    stream->pcmMissCount = 0;
+    stream->lastPcmFrame.clear();
+    stream->pendingMixedSamples.clear();
+    stream->resampler.reset();
+    stream->fecDecoder.reset();
+    if (clearBuffers && stream->jitter)
+        stream->jitter->clear();
+}
+
+void ChannelManager::applyStreamCodecConfig(RxStreamState* stream, bool resetState)
+{
+    if (!stream || !stream->codec)
+        return;
+
+    const RxCodecConfig config = stream->configKnown ? stream->config
+        : RxCodecConfig{m_codecTemplate ? m_codecTemplate->mode() : 1600,
+                        (m_codecTemplate && m_codecTemplate->activeCodecTransportId() == Proto::CODEC_TRANSPORT_OPUS)
+                            ? Proto::CODEC_TRANSPORT_OPUS
+                            : ((m_codecTemplate && m_codecTemplate->forcePcm())
+                                   ? Proto::CODEC_TRANSPORT_PCM
+                                   : Proto::CODEC_TRANSPORT_CODEC2)};
+
+    if (config.codecId == Proto::CODEC_TRANSPORT_OPUS)
+        stream->codec->setCodecType(Codec2Wrapper::CodecTypeOpus);
+    else
+        stream->codec->setCodecType(Codec2Wrapper::CodecTypeCodec2);
+    stream->codec->setForcePcm(config.codecId == Proto::CODEC_TRANSPORT_PCM);
+    stream->codec->setMode(config.mode);
+    stream->resampler.setRates(qMax(8000, stream->codec->sampleRate()), m_mixSampleRate);
+
+    if (resetState)
+        resetStreamState(stream, true);
+}
+
+ChannelManager::RxStreamState* ChannelManager::ensureStream(quint32 senderId)
+{
+    if (senderId == 0)
+        return nullptr;
+
+    const auto it = m_streams.constFind(senderId);
+    if (it != m_streams.constEnd())
+        return it.value();
+
+    RxStreamState* stream = new RxStreamState;
+    stream->senderId = senderId;
+    stream->codec = new Codec2Wrapper(this);
+    stream->jitter = new JitterBuffer(this);
+    stream->fecDecoder.setEnabled(m_fecEnabled);
+    applyTemplateLibraryPaths(stream);
+
+    const auto configIt = m_codecConfigCache.constFind(senderId);
+    if (configIt != m_codecConfigCache.constEnd())
+    {
+        stream->config = configIt.value();
+        stream->configKnown = true;
+    }
+    applyStreamCodecConfig(stream, false);
+    if (stream->jitter)
+        stream->jitter->setMinBufferedFrames(streamMinBufferedFrames(stream));
+    stream->fadeInOnNextFrame = true;
+
+    m_streams.insert(senderId, stream);
+    emitPlayoutTalkersState();
+    return stream;
+}
+
+void ChannelManager::deleteStream(quint32 senderId)
+{
+    RxStreamState* stream = m_streams.take(senderId);
+    if (!stream)
+        return;
+
+    delete stream->codec;
+    delete stream->jitter;
+    delete stream;
+    emitPlayoutTalkersState();
+}
+
+int ChannelManager::mixFrameSamples() const
+{
+    return m_playoutPcmBytes / static_cast<int>(sizeof(qint16));
+}
+
+int ChannelManager::streamMinBufferedFrames(const RxStreamState* stream) const
+{
+    int targetBufferMs = 80;
+#ifdef Q_OS_ANDROID
+    targetBufferMs = 160;
+#elif defined(Q_OS_WINDOWS)
+    targetBufferMs = 100;
+#endif
+
+    int frames = qMax(2, targetBufferMs / qMax(1, m_playoutFrameMs));
+    if (stream && m_fecEnabled)
+        frames = qMax(frames, stream->fecDecoder.blockSize() + 2);
+    return frames;
+}
+
+void ChannelManager::updateStreamJitterTargets()
+{
+    for (RxStreamState* stream : std::as_const(m_streams))
+    {
+        if (stream && stream->jitter)
+            stream->jitter->setMinBufferedFrames(streamMinBufferedFrames(stream));
+    }
+}
+
+void ChannelManager::updatePlayoutParams()
+{
+    int frameMs = 20;
+    if (m_codecTemplate && m_codecTemplate->frameMs() > 0)
+        frameMs = m_codecTemplate->frameMs();
+
+    const bool changed = frameMs != m_playoutFrameMs;
+    m_playoutFrameMs = frameMs;
+    m_playoutPcmBytes = qMax(2, (m_mixSampleRate * m_playoutFrameMs * static_cast<int>(sizeof(qint16))) / 1000);
+    m_silenceFrame = QByteArray(m_playoutPcmBytes, 0);
+    m_playoutTimer.setInterval(m_playoutFrameMs);
+    const int samples = mixFrameSamples();
+    m_crossfadeSamples = qMax(10, samples / 2);
+
+    if (m_audioOutput)
+        m_audioOutput->setSampleRate(m_mixSampleRate);
+
+    updateStreamJitterTargets();
+
+    if (changed)
+    {
+        for (RxStreamState* stream : std::as_const(m_streams))
+            resetStreamState(stream, true);
+    }
 }
 
 void ChannelManager::onDatagramReceived(const QByteArray& datagram,
@@ -417,41 +623,54 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
         type == Proto::PKT_TALK_RELEASE ||
         type == Proto::PKT_TALK_DENY)
     {
-        quint32 talkerId = readU32Payload(parsed.encryptedPayload, parsed.header.senderId);
-        if (type == Proto::PKT_TALK_RELEASE)
-        {
-            const quint32 releasedTalkerId = talkerId;
-            m_releaseTalkerId = releasedTalkerId;
-            emit talkReleasePacketDetected(releasedTalkerId);
-            talkerId = 0;
-        }
-        if (talkerId != 0)
-        {
-            // New talker; re-prime playout to avoid repeating stale frames.
-            m_playoutPrimed = false;
-            m_lastPcmFrame.clear();
-            m_fadeFromPcm.clear();
-            m_fadeOutPending = false;
-            m_fadeOutFrame.clear();
-            m_silenceMode = false;
-            m_plcRemaining = 0;
-            m_pcmMissCount = 0;
-            m_talkEnded = false;
-            m_releaseTalkerId = 0;
-            m_fecDecoder.reset();
-            if (m_jitter)
-                m_jitter->clear();
-        }
-        else
-        {
-            // Talk ended: drain already-buffered frames, then stop gracefully.
-            m_talkEnded = true;
-        }
-        emit talkerChanged(talkerId);
+        const quint32 talkerId = readU32Payload(parsed.encryptedPayload, parsed.header.senderId);
         if (type == Proto::PKT_TALK_DENY)
         {
             emit talkDenied(talkerId);
+            return;
         }
+
+        if (talkerId == 0)
+            return;
+
+        if (type == Proto::PKT_TALK_GRANT)
+        {
+            m_activeTalkers.insert(talkerId);
+            if (RxStreamState* stream = ensureStream(talkerId))
+            {
+                stream->talkEnded = false;
+                stream->releaseCompletionPending = false;
+                stream->playoutPrimed = false;
+                stream->fadeInOnNextFrame = true;
+                stream->silenceMode = true;
+                stream->pcmMissCount = 0;
+                stream->lastPcmFrame.clear();
+                stream->pendingMixedSamples.clear();
+                stream->resampler.reset();
+                stream->fecDecoder.reset();
+                if (stream->jitter)
+                    stream->jitter->clear();
+            }
+            emitActiveTalkersState();
+            return;
+        }
+
+        emit talkReleasePacketDetected(talkerId);
+        m_activeTalkers.remove(talkerId);
+        if (RxStreamState* stream = m_streams.value(talkerId, nullptr))
+        {
+            stream->talkEnded = true;
+            stream->releaseCompletionPending = true;
+            const bool drained = stream->jitter->size() == 0 &&
+                                 stream->pendingMixedSamples.isEmpty() &&
+                                 stream->lastPcmFrame.isEmpty();
+            if (drained)
+            {
+                deleteStream(talkerId);
+                emit talkReleasePlayoutCompleted(talkerId);
+            }
+        }
+        emitActiveTalkersState();
         return;
     }
 
@@ -482,6 +701,19 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
             }
             if (pcmOnly)
                 codecId = Proto::CODEC_TRANSPORT_PCM;
+
+            RxCodecConfig config{static_cast<int>(mode), codecId};
+            m_codecConfigCache.insert(parsed.header.senderId, config);
+            if (RxStreamState* stream = m_streams.value(parsed.header.senderId, nullptr))
+            {
+                const bool changed = !stream->configKnown ||
+                    stream->config.mode != config.mode ||
+                    stream->config.codecId != config.codecId;
+                stream->config = config;
+                stream->configKnown = true;
+                if (changed)
+                    applyStreamCodecConfig(stream, true);
+            }
             emit codecConfigReceived(parsed.header.senderId,
                                      static_cast<int>(mode),
                                      pcmOnly,
@@ -498,13 +730,21 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
                 reinterpret_cast<const uchar*>(parsed.encryptedPayload.constData()));
             emit serverTalkTimeoutConfigured(static_cast<int>(timeoutSec));
         }
+        if (parsed.encryptedPayload.size() >= 4)
+        {
+            const quint8 flags = static_cast<quint8>(parsed.encryptedPayload.at(2));
+            const int maxActiveTalkers = qMax(1, static_cast<int>(static_cast<quint8>(parsed.encryptedPayload.at(3))));
+            m_serverMultiTalkEnabled = (flags & 0x01) != 0;
+            m_serverMaxActiveTalkers = maxActiveTalkers;
+            emit serverMultiTalkConfigured(m_serverMultiTalkEnabled, m_serverMaxActiveTalkers);
+        }
         return;
     }
 
     if (type != Proto::PKT_AUDIO && type != Proto::PKT_FEC)
         return;
 
-    if (!m_cipher || !m_codec || !m_jitter)
+    if (!m_cipher)
         return;
 
     QByteArray plaintext;
@@ -516,6 +756,10 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
     {
         return;
     }
+
+    RxStreamState* stream = ensureStream(parsed.header.senderId);
+    if (!stream)
+        return;
 
     if (type == Proto::PKT_FEC)
     {
@@ -529,20 +773,18 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
         const QByteArray parity = plaintext.mid(4);
 
         const QVector<FecDecodedFrame> frames =
-            m_fecDecoder.pushParity(blockStart, blockSize, parityIndex, parity);
+            stream->fecDecoder.pushParity(blockStart, blockSize, parityIndex, parity);
         for (const FecDecodedFrame& frame : frames)
-            m_jitter->pushFrame(frame.seq, frame.frame);
+            stream->jitter->pushFrame(frame.seq, frame.frame);
 
-        if (!frames.isEmpty() && !m_playoutTimer.isActive())
+        if ((!frames.isEmpty() || stream->jitter->size() > 0) && !m_playoutTimer.isActive())
             m_playoutTimer.start();
         return;
     }
 
-    m_talkEnded = false;
-    m_releaseTalkerId = 0;
+    stream->talkEnded = false;
+    stream->releaseCompletionPending = false;
 
-    // Audio payload format (current): [audioSeq:2][codecFrame...]
-    // Keep a minimal fallback for very old/short payloads only.
     quint16 audioSeq = parsed.header.seq;
     QByteArray frame;
     if (plaintext.size() >= 2)
@@ -557,13 +799,13 @@ void ChannelManager::onDatagramReceived(const QByteArray& datagram,
     }
     if (frame.isEmpty())
         return;
-    m_jitter->pushFrame(audioSeq, frame);
+    stream->jitter->pushFrame(audioSeq, frame);
 
     if (m_fecEnabled)
     {
-        const QVector<FecDecodedFrame> frames = m_fecDecoder.pushData(audioSeq, frame);
+        const QVector<FecDecodedFrame> frames = stream->fecDecoder.pushData(audioSeq, frame);
         for (const FecDecodedFrame& outFrame : frames)
-            m_jitter->pushFrame(outFrame.seq, outFrame.frame);
+            stream->jitter->pushFrame(outFrame.seq, outFrame.frame);
     }
 
     if (!m_playoutTimer.isActive())
@@ -597,222 +839,165 @@ void ChannelManager::onJoinRetryTimeout()
     m_joinRetriesLeft--;
 }
 
-void ChannelManager::updatePlayoutParams()
+ChannelManager::StreamRenderResult ChannelManager::renderStreamFrame(RxStreamState* stream)
 {
-    int frameMs = 20;
-    int pcmBytes = 320;
-    if (m_codec)
-    {
-        if (m_codec->frameMs() > 0)
-            frameMs = m_codec->frameMs();
-        if (m_codec->pcmFrameBytes() > 0)
-            pcmBytes = m_codec->pcmFrameBytes();
-    }
+    StreamRenderResult result;
+    result.pcm = m_silenceFrame;
+    if (!stream || !stream->codec || !stream->jitter)
+        return result;
 
-    const bool changed = (frameMs != m_playoutFrameMs) ||
-                         (pcmBytes != m_playoutPcmBytes);
-    m_playoutFrameMs = frameMs;
-    m_playoutPcmBytes = pcmBytes;
-    m_silenceFrame = QByteArray(m_playoutPcmBytes, 0);
-    m_playoutTimer.setInterval(m_playoutFrameMs);
-    const int samples = m_playoutPcmBytes / static_cast<int>(sizeof(qint16));
-    m_crossfadeSamples = qMax(10, samples / 2);
+    const int targetSamples = mixFrameSamples();
+    if (targetSamples <= 0)
+        return result;
 
-    int targetBufferMs = 80;
-#ifdef Q_OS_ANDROID
-    targetBufferMs = 160;
-#elif defined(Q_OS_WINDOWS)
-    // Keep a modest playout cushion on Windows without adding too much
-    // end-to-end latency.
-    targetBufferMs = 100;
-#endif
-    if (m_codec && m_codec->forcePcm() && !m_fecEnabled)
+    if (!stream->playoutPrimed)
     {
-#ifdef Q_OS_ANDROID
-        targetBufferMs = 260;
-#else
-        targetBufferMs = 200;
-#endif
-    }
-    if (m_jitter && m_playoutFrameMs > 0)
-    {
-        int frames = targetBufferMs / m_playoutFrameMs;
-        if (frames < 2)
-            frames = 2;
-        if (m_fecEnabled)
-            frames = qMax(frames, m_fecDecoder.blockSize() + 2);
-        m_jitter->setMinBufferedFrames(frames);
-    }
-
-    if (changed)
-    {
-        m_playoutPrimed = false;
-        if (!m_lastPcmFrame.isEmpty())
+        if (stream->jitter->size() < stream->jitter->minBufferedFrames())
         {
-            m_fadeOutPending = true;
-            m_fadeOutFrame = m_lastPcmFrame;
+            if (stream->talkEnded && stream->jitter->size() == 0 && stream->pendingMixedSamples.isEmpty())
+            {
+                result.removeStream = true;
+                result.releaseCompleted = stream->releaseCompletionPending;
+                result.talkerId = stream->senderId;
+            }
+            return result;
         }
-        else
-        {
-            m_fadeOutPending = false;
-            m_fadeOutFrame.clear();
-        }
-        m_lastPcmFrame.clear();
-        m_fadeFromPcm.clear();
-        m_fadeInOnNextFrame = true;
-        m_silenceMode = false;
-        m_plcRemaining = 0;
-        m_pcmMissCount = 0;
-        m_talkEnded = false;
-        m_releaseTalkerId = 0;
-        m_fecDecoder.reset();
-        if (m_jitter)
-            m_jitter->clear();
+        stream->playoutPrimed = true;
+        stream->fadeInOnNextFrame = true;
+        stream->silenceMode = false;
     }
+
+    while (stream->pendingMixedSamples.size() < targetSamples)
+    {
+        const QByteArray encoded = stream->jitter->popFrame(false);
+        if (encoded.isEmpty())
+            break;
+
+        QByteArray decoded = stream->codec->decode(encoded);
+        if (decoded.isEmpty())
+            decoded = QByteArray(stream->codec->pcmFrameBytes(), 0);
+        const QVector<qint16> input = pcmToSamples(decoded);
+        QVector<qint16> resampled;
+        stream->resampler.push(input, resampled);
+        if (!resampled.isEmpty())
+            stream->pendingMixedSamples += resampled;
+    }
+
+    if (stream->pendingMixedSamples.size() >= targetSamples)
+    {
+        QByteArray pcm = samplesToPcm(stream->pendingMixedSamples, 0, targetSamples);
+        stream->pendingMixedSamples.remove(0, targetSamples);
+        if (stream->fadeInOnNextFrame)
+        {
+            pcm = crossfadePcm16(m_silenceFrame, pcm, m_crossfadeSamples);
+            stream->fadeInOnNextFrame = false;
+        }
+        stream->lastPcmFrame = pcm;
+        stream->silenceMode = false;
+        stream->pcmMissCount = 0;
+        result.pcm = pcm;
+        return result;
+    }
+
+    if (stream->talkEnded)
+    {
+        if (!stream->pendingMixedSamples.isEmpty())
+        {
+            QByteArray pcm = samplesToPcm(stream->pendingMixedSamples, 0, stream->pendingMixedSamples.size());
+            stream->pendingMixedSamples.clear();
+            pcm = padPcmToSize(pcm, m_playoutPcmBytes);
+            stream->lastPcmFrame = pcm;
+            stream->silenceMode = false;
+            result.pcm = pcm;
+            return result;
+        }
+
+        if (!stream->lastPcmFrame.isEmpty() && !stream->silenceMode)
+        {
+            result.pcm = crossfadePcm16(stream->lastPcmFrame, m_silenceFrame, m_crossfadeSamples);
+        }
+        result.removeStream = true;
+        result.releaseCompleted = stream->releaseCompletionPending;
+        result.talkerId = stream->senderId;
+        stream->lastPcmFrame.clear();
+        stream->silenceMode = true;
+        return result;
+    }
+
+    ++stream->pcmMissCount;
+    if (!stream->lastPcmFrame.isEmpty() && !stream->silenceMode)
+    {
+        result.pcm = holdDecayFromTailPcm16(stream->lastPcmFrame);
+        stream->silenceMode = true;
+        return result;
+    }
+
+    stream->silenceMode = true;
+    return result;
 }
 
 void ChannelManager::onPlayoutTick()
 {
-    if (!m_audioOutput || !m_codec || !m_jitter)
+    if (!m_audioOutput)
         return;
 
-    if (!m_playoutPrimed)
+    if (m_streams.isEmpty())
     {
-        if (m_jitter->size() < m_jitter->minBufferedFrames())
-            return;
-        m_playoutPrimed = true;
-    }
-
-    if (m_fadeOutPending)
-    {
-        const QByteArray faded = crossfadePcm16(m_fadeOutFrame, m_silenceFrame, m_crossfadeSamples);
-        m_audioOutput->playFrame(faded);
-        emit audioFrameReceived(faded);
-        m_fadeOutPending = false;
-        m_fadeOutFrame.clear();
-        m_silenceMode = true;
-        m_plcRemaining = 0;
-        m_pcmMissCount = 0;
+        m_playoutTimer.stop();
         return;
     }
 
-    const int targetFrames = m_jitter->minBufferedFrames();
-    const int size = m_jitter->size();
-    const bool pcmMode = (m_codec && m_codec->forcePcm());
+    QVector<int> mix(mixFrameSamples(), 0);
+    QList<quint32> removeTalkers;
+    QList<quint32> completedTalkers;
+    bool anyAudible = false;
+    int contributingStreams = 0;
 
-    if (m_talkEnded && size == 0)
+    const QList<quint32> talkers = sortedPlayoutTalkers();
+    for (quint32 senderId : talkers)
     {
-        const quint32 releasedTalkerId = m_releaseTalkerId;
-        if (!m_silenceMode && !m_lastPcmFrame.isEmpty())
+        RxStreamState* stream = m_streams.value(senderId, nullptr);
+        if (!stream)
+            continue;
+
+        const StreamRenderResult render = renderStreamFrame(stream);
+        const QVector<qint16> samples = pcmToSamples(render.pcm);
+        for (int i = 0; i < mix.size() && i < samples.size(); ++i)
+            mix[i] += samples.at(i);
+        if (render.pcm != m_silenceFrame)
         {
-            const QByteArray faded = crossfadePcm16(m_lastPcmFrame, m_silenceFrame, m_crossfadeSamples);
-            m_audioOutput->playFrame(faded);
-            emit audioFrameReceived(faded);
+            anyAudible = true;
+            ++contributingStreams;
         }
-        else
+        if (render.removeStream)
         {
-            m_audioOutput->playFrame(m_silenceFrame);
-            emit audioFrameReceived(m_silenceFrame);
+            removeTalkers.append(senderId);
+            if (render.releaseCompleted && render.talkerId != 0)
+                completedTalkers.append(render.talkerId);
         }
-        m_silenceMode = true;
-        m_plcRemaining = 0;
-        m_pcmMissCount = 0;
-        m_lastPcmFrame.clear();
-        m_fadeFromPcm.clear();
-        m_talkEnded = false;
-        m_releaseTalkerId = 0;
-        if (releasedTalkerId != 0)
-            emit talkReleasePlayoutCompleted(releasedTalkerId);
+    }
+
+    if (mix.isEmpty())
         return;
-    }
 
-    int dropMargin = 2;
-    if (m_fecEnabled || pcmMode)
-        dropMargin = m_fecDecoder.blockSize() / 2 + 2;
-    const bool allowDropCorrection = true;
-    if (allowDropCorrection && size > targetFrames + dropMargin)
+    QVector<qint16> mixedSamples;
+    mixedSamples.reserve(mix.size());
+    const int divisor = qMax(1, contributingStreams);
+    for (int value : std::as_const(mix))
     {
-        // Drop extra frames to keep latency bounded without changing pitch.
-        QByteArray lastDropped;
-        while (m_jitter->size() > targetFrames + dropMargin)
-        {
-            const QByteArray dropped = m_jitter->popFrame(false);
-            if (dropped.isEmpty())
-                break;
-            lastDropped = dropped;
-        }
-        if (!lastDropped.isEmpty())
-        {
-            if (!m_lastPcmFrame.isEmpty())
-            {
-                m_fadeFromPcm = m_lastPcmFrame;
-            }
-            else
-            {
-                const QByteArray droppedPcm = m_codec->decode(lastDropped);
-                if (!droppedPcm.isEmpty())
-                    m_fadeFromPcm = droppedPcm;
-            }
-        }
+        const int scaled = value / divisor;
+        mixedSamples.append(static_cast<qint16>(qBound(-32768, scaled, 32767)));
     }
 
-    QByteArray encoded = m_jitter->popFrame(false);
-    if (encoded.isEmpty())
-    {
-        if (m_audioOutput && m_audioOutput->queuedMs() > (m_playoutFrameMs * 2))
-        {
-            // Output side still has buffered audio; avoid injecting synthetic frames.
-            return;
-        }
+    const QByteArray mixedPcm = samplesToPcm(mixedSamples, 0, mixedSamples.size());
+    m_audioOutput->playFrame(anyAudible ? mixedPcm : m_silenceFrame);
+    emit audioFrameReceived(anyAudible ? mixedPcm : m_silenceFrame);
 
-        ++m_pcmMissCount;
-        m_plcRemaining = 0;
+    for (quint32 senderId : std::as_const(removeTalkers))
+        deleteStream(senderId);
+    for (quint32 talkerId : std::as_const(completedTalkers))
+        emit talkReleasePlayoutCompleted(talkerId);
 
-        if (!m_silenceMode && !m_lastPcmFrame.isEmpty())
-        {
-            // One short decay frame, then pure silence until a real frame arrives.
-            QByteArray decay = holdDecayFromTailPcm16(m_lastPcmFrame);
-            if (decay.isEmpty())
-                decay = crossfadePcm16(m_lastPcmFrame, m_silenceFrame, m_crossfadeSamples);
-            if (decay.isEmpty())
-                decay = m_silenceFrame;
-
-            m_audioOutput->playFrame(decay);
-            emit audioFrameReceived(decay);
-            m_silenceMode = true;
-            return;
-        }
-
-        m_silenceMode = true;
-        m_audioOutput->playFrame(m_silenceFrame);
-        emit audioFrameReceived(m_silenceFrame);
-        return;
-    }
-
-    m_pcmMissCount = 0;
-    if (m_silenceMode)
-    {
-        m_fadeInOnNextFrame = true;
-        m_silenceMode = false;
-    }
-    m_plcRemaining = 0;
-
-    QByteArray pcm = m_codec->decode(encoded);
-    if (pcm.isEmpty())
-        pcm = m_silenceFrame;
-
-    if (!m_fadeFromPcm.isEmpty())
-    {
-        pcm = blendBoundaryPcm16(m_fadeFromPcm, pcm, m_crossfadeSamples);
-        m_fadeFromPcm.clear();
-    }
-    if (m_fadeInOnNextFrame)
-    {
-        pcm = crossfadePcm16(m_silenceFrame, pcm, m_crossfadeSamples);
-        m_fadeInOnNextFrame = false;
-    }
-
-    m_audioOutput->playFrame(pcm);
-    emit audioFrameReceived(pcm);
-    m_lastPcmFrame = pcm;
+    if (m_streams.isEmpty())
+        m_playoutTimer.stop();
 }
